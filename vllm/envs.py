@@ -52,6 +52,15 @@ if TYPE_CHECKING:
     VERBOSE: bool = False
     VLLM_ALLOW_LONG_MAX_MODEL_LEN: bool = False
 
+    # table configs
+    VLLM_TABLE_READ_NROWS: int = 500
+    VLLM_TABLE_MAX_COLS: int = 100
+    VLLM_TABLE_MAX_ROWS: int = 50
+
+    VLLM_TABLE_INSERT_EMBS_TOKEN: str = "<insert_embs>"
+    VLLM_TABLE_INSERT_SEP_TOKEN: str = "<insert_sep>"
+    VLLM_TABLE_INSERT_EMBS_TOKEN_ID: int = -114
+
 
 def get_default_cache_root():
     return os.getenv(
@@ -341,6 +350,33 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda:
     (os.environ.get("VLLM_ALLOW_LONG_MAX_MODEL_LEN", "0").strip().lower() in
      ("1", "true")),
+
+    ### table configs
+    # Timeout for fetching table data when serving multimodal models
+    # Default is 30 seconds
+    "VLLM_TABLE_FETCH_TIMEOUT":
+    lambda: int(os.getenv("VLLM_TABLE_FETCH_TIMEOUT", "30")),
+
+    # MAX column for vllm table encoder
+    # Default is 30 seconds
+    "VLLM_TABLE_READ_NROWS":
+    lambda: int(os.getenv("VLLM_TABLE_READ_NROWS", "500")),
+
+    # MAX column for vllm table encoder
+    # Default is 30 seconds
+    "VLLM_TABLE_MAX_COLS":
+    lambda: int(os.getenv("VLLM_TABLE_MAX_COLS", "100")),
+
+    # MAX rows for vllm table encoder
+    # Default is 30 seconds
+    "VLLM_TABLE_MAX_ROWS":
+    lambda: int(os.getenv("VLLM_TABLE_MAX_ROWS", "50")),
+    "VLLM_TABLE_INSERT_EMBS_TOKEN":
+    lambda: os.getenv("VLLM_TABLE_INSERT_EMBS_TOKEN", "<insert_embs>"),
+    "VLLM_TABLE_INSERT_SEP_TOKEN":
+    lambda: os.getenv("VLLM_TABLE_INSERT_SEP_TOKEN", "<insert_sep>"),
+    "VLLM_TABLE_INSERT_EMBS_TOKEN_ID":
+    lambda: int(os.getenv("VLLM_TABLE_INSERT_EMBS_TOKEN_ID", -114)),
 }
 
 # end-env-vars-definition

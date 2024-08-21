@@ -1,11 +1,15 @@
 import base64
 from io import BytesIO
-from typing import Union
+from pathlib import Path
+from typing import List, Union
+from urllib.parse import urlparse
 
+import pandas as pd
 from PIL import Image
 
 from vllm.connections import global_http_connection
-from vllm.envs import VLLM_IMAGE_FETCH_TIMEOUT
+from vllm.envs import (S3_ACCESS_KEY_ID, S3_ENDPOINT_URL, S3_SECRET_ACCESS_KEY,
+                       VLLM_IMAGE_FETCH_TIMEOUT, VLLM_TABLE_READ_NROWS)
 from vllm.multimodal.base import MultiModalDataDict
 
 
@@ -66,6 +70,54 @@ async def async_fetch_image(image_url: str,
 async def async_get_and_parse_image(image_url: str) -> MultiModalDataDict:
     image = await async_fetch_image(image_url)
     return {"image": image}
+
+
+def _get_file_stem(url):
+    # Parse the URL
+    parsed_url = urlparse(url)
+
+    # Extract the path part from the URL
+    path = parsed_url.path
+
+    # Use pathlib to get the file stem
+    file_stem = Path(path).stem
+
+    return file_stem
+
+
+def load_tables(table_urls: List[str], nrows) -> List[pd.DataFrame]:
+    """
+    load a csv file to pd.DataFrame from a Http urls or file paths or s3 schema
+
+    By default, the df has store the 500 nrows and use 'utf-8'
+    """
+    dfs = []
+    for table_url in table_urls:
+        storage_options = {}
+        if table_url.startswith("s3://"):
+            storage_options = {
+                "key": S3_ACCESS_KEY_ID,
+                "secret": S3_SECRET_ACCESS_KEY,
+                "client_kwargs": {
+                    "endpoint_url": S3_ENDPOINT_URL
+                },
+            }
+
+        df = pd.read_csv(table_url,
+                         nrows=nrows,
+                         low_memory=False,
+                         encoding="utf-8",
+                         storage_options=storage_options)
+        dfs.append((_get_file_stem(table_url), df))
+
+    return dfs
+
+
+def get_and_parse_table(
+        table_urls: List[str],
+        nrows: int = VLLM_TABLE_READ_NROWS) -> MultiModalDataDict:
+    dfs = load_tables(table_urls, nrows=nrows)
+    return {"table": dfs}
 
 
 def encode_image_base64(
