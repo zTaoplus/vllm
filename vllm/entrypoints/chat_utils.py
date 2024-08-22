@@ -1,9 +1,10 @@
 import codecs
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import (Awaitable, Iterable, List, Optional, Tuple, Union, cast,
-                    final)
+from typing import (Awaitable, Iterable, List, Literal, Optional, Tuple, Union,
+                    cast, final)
 
+import pandas as pd
 # yapf conflicts with isort for this block
 # yapf: disable
 from openai.types.chat import ChatCompletionContentPartImageParam
@@ -19,6 +20,7 @@ from transformers import PreTrainedTokenizer
 from typing_extensions import Required, TypedDict
 
 from vllm.config import ModelConfig
+from vllm.envs import VLLM_TABLE_INSERT_EMBS_TOKEN, VLLM_TABLE_INSERT_SEP_TOKEN
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalDataDict
 from vllm.multimodal.utils import async_get_and_parse_image
@@ -33,7 +35,32 @@ class CustomChatCompletionContentPartParam(TypedDict, total=False):
     """The type of the content part."""
 
 
+class TableCols(TypedDict, total=False):
+    name: Required[str]
+    dtype: Required[str]
+    unique: Required[bool]
+    contains_nan: Required[bool]
+    
+    comment: Optional[str] = None
+
+class Table(TypedDict, total=False):
+    varname: Required[str]
+    
+    cols: Required[List[TableCols]]
+
+    # TODO: validate the length, can check the max length about the input csv value
+    values: Required[List[List]]
+
+
+class ChatCompletionContentPartTableParam(TypedDict, total=False):
+    table: Required[List[Table]]
+
+    type: Required[Literal["table"]]
+    """The type of the content part."""
+
+
 ChatCompletionContentPartParam = Union[OpenAIChatCompletionContentPartParam,
+                                       ChatCompletionContentPartTableParam,
                                        CustomChatCompletionContentPartParam]
 
 
@@ -112,14 +139,64 @@ def _image_token_str(model_config: ModelConfig,
     raise TypeError(f"Unknown model type: {model_type}")
 
 
-# TODO: Let user specify how to insert image tokens into prompt
-# (similar to chat template)
 def _get_full_image_text_prompt(image_token_str: str, text_prompt: str) -> str:
     """Combine image and text prompts for vision language model"""
 
     # NOTE: For now we assume all model architectures use the same
     # image + text prompt format. This may change in the future.
     return f"{image_token_str}\n{text_prompt}"
+
+
+def __dataframe_info_simple(table: Table) -> str:
+    df_info_template_simple = (
+        "/*\nDetails about the '{df_name}' "
+        "dataframe that can be used as follows:\n{desc_info}\n*/")
+
+    desc_info_lines = []
+    for col in table["cols"]:
+
+        comment_str = "means "+ col["comment"]  if col.get("comment") else ""
+        data_type = col.get("dtype")
+
+        contains_nan_str = "contains NaN, " if col.get("contains_nan",False) else ""
+
+        unique_str = "is unique, " if col.get("unique",False) else ""
+
+        if ("float" in data_type) or ("int" in data_type):
+            unique_str = ""
+
+        exp_val = (VLLM_TABLE_INSERT_SEP_TOKEN + VLLM_TABLE_INSERT_EMBS_TOKEN +
+                   VLLM_TABLE_INSERT_SEP_TOKEN)
+        key = col.get("name")
+        dil = (f"- '{key}' {data_type}, "
+               f"{unique_str}{contains_nan_str}{comment_str}"
+               f"Example Values: {exp_val}")
+
+        desc_info_lines.append(dil)
+
+    desc_info = "\n".join(desc_info_lines)
+
+    desc_info = desc_info.replace(", '...']", ", ...]")
+
+    df_info = df_info_template_simple.format(
+        df_name=table["varname"],
+        desc_info=desc_info,
+    )
+
+    return df_info
+
+
+def __build_table_question(tables: List[Table]):
+    pref = "## Details about the dataframes:\n\n"
+
+    df_info_list = [
+        __dataframe_info_simple(table) for table in tables
+    ]
+    return pref + '\n\n'.join(df_info_list)
+
+
+def _get_full_table_text_prompt(tables: List[Table]) -> str:
+    return __build_table_question(tables)
 
 
 def _parse_chat_message_content_parts(
@@ -129,8 +206,10 @@ def _parse_chat_message_content_parts(
     tokenizer: PreTrainedTokenizer,
 ) -> ChatMessageParseResult:
     texts: List[str] = []
-    mm_futures: List[Awaitable[MultiModalDataDict]] = []
+    mm_futures: List[Union[Awaitable[MultiModalDataDict],
+                           MultiModalDataDict]] = []
 
+    is_table = False
     for part in parts:
         part_type = part["type"]
         if part_type == "text":
@@ -151,23 +230,38 @@ def _parse_chat_message_content_parts(
 
             image_future = async_get_and_parse_image(image_url["url"])
             mm_futures.append(image_future)
+
+        elif part_type == "table":
+            if len(mm_futures) > 0:
+                raise NotImplementedError(
+                    "Multiple 'table' input is currently not supported.")
+
+            table_data:List[Table] = cast(ChatCompletionContentPartTableParam,
+                             part)["table"]
+            mm_futures.append({"table":table_data})
+            is_table = True
         else:
             raise NotImplementedError(f"Unknown part type: {part_type}")
 
     text_prompt = "\n".join(texts)
 
     if mm_futures:
-        image_token_str = _image_token_str(model_config, tokenizer)
-        if image_token_str is not None:
-            if image_token_str in text_prompt:
-                logger.warning(
-                    "Detected image token string in the text prompt. "
-                    "Skipping prompt formatting.")
-            else:
-                text_prompt = _get_full_image_text_prompt(
-                    image_token_str=image_token_str,
-                    text_prompt=text_prompt,
-                )
+        if is_table:
+            mm_data: MultiModalDataDict = mm_futures[0]
+            text_prompt = _get_full_table_text_prompt(tables=mm_data["table"])
+
+        else:
+            image_token_str = _image_token_str(model_config, tokenizer)
+            if image_token_str is not None:
+                if image_token_str in text_prompt:
+                    logger.warning(
+                        "Detected image token string in the text prompt. "
+                        "Skipping prompt formatting.")
+                else:
+                    text_prompt = _get_full_image_text_prompt(
+                        image_token_str=image_token_str,
+                        text_prompt=text_prompt,
+                    )
 
     messages = [ConversationMessage(role=role, content=text_prompt)]
 

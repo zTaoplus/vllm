@@ -1,3 +1,4 @@
+import inspect
 import time
 from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional
 from typing import Sequence as GenericSequence
@@ -21,7 +22,10 @@ from vllm.entrypoints.openai.protocol import (
     FunctionCall, ToolCall, UsageInfo)
 from vllm.entrypoints.openai.serving_engine import (LoRAModulePath,
                                                     OpenAIServing,
-                                                    PromptAdapterPath)
+                                                    PromptAdapterPath,
+                                                    TextTokensPrompt)
+from vllm.envs import (VLLM_TABLE_INSERT_EMBS_TOKEN,
+                       VLLM_TABLE_INSERT_EMBS_TOKEN_ID)
 from vllm.inputs import PromptInputs
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalDataDict
@@ -32,6 +36,49 @@ from vllm.tracing import (contains_trace_headers, extract_trace_headers,
 from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
+
+
+def _table_tokenizer_insert(prompt: str,
+                            tokenizer: PreTrainedTokenizer) -> List[int]:
+    '''
+    Tokenizes the input prompt by inserting a separator token 
+    between each chunk of text.
+
+    Args:
+        prompt (str): The input prompt to be tokenized. 
+                    It contains one or more instances of the 
+                    INSERT_EMBS_TOKEN.
+        tokenizer (transformers.PreTrainedTokenizer): 
+            The tokenizer object used for tokenization.
+
+    Returns:
+       List[int]: The tokenized input prompt as a list of input IDs. 
+
+    '''
+    prompt_chunks = [
+        tokenizer(e,
+                  padding="longest",
+                  max_length=tokenizer.model_max_length,
+                  truncation=True).input_ids
+        for e in prompt.split(VLLM_TABLE_INSERT_EMBS_TOKEN)
+    ]
+
+    def insert_separator(X, sep):
+        return [ele for sublist in zip(X, [sep] * len(X))
+                for ele in sublist][:-1]
+
+    input_ids = []
+    offset = 0
+    if len(prompt_chunks) > 0 and len(prompt_chunks[0]) > 0 and prompt_chunks[
+            0][0] == tokenizer.bos_token_id:
+        offset = 1
+        input_ids.append(prompt_chunks[0][0])
+
+    for x in insert_separator(prompt_chunks,
+                              [VLLM_TABLE_INSERT_EMBS_TOKEN_ID] * 3 *
+                              (offset + 1)):
+        input_ids.extend(x[offset:])
+    return input_ids
 
 
 class OpenAIServingChat(OpenAIServing):
@@ -88,6 +135,7 @@ class OpenAIServingChat(OpenAIServing):
             ) = self._maybe_get_adapters(request)
 
             model_config = self.model_config
+
             tokenizer = await self.async_engine_client.get_tokenizer(
                 lora_request)
 
@@ -116,10 +164,13 @@ class OpenAIServingChat(OpenAIServing):
         try:
             if len(mm_futures):
                 # since we support only single mm data currently
-                assert len(
-                    mm_futures
-                ) == 1, "Multiple 'image_url' input is currently not supported."
-                mm_data = await mm_futures[0]
+                assert len(mm_futures) == 1, (
+                    "Multiple 'table_url' | 'image_url' "
+                    "input is currently not supported.")
+                mm_data = mm_futures[0]
+                if inspect.isawaitable(mm_data):
+                    mm_data = await mm_data
+
         except Exception as e:
             logger.error("Error in loading multi-modal data: %s", e)
             return self.create_error_response(str(e))
@@ -129,13 +180,22 @@ class OpenAIServingChat(OpenAIServing):
             guided_decode_logits_processor = (
                 await self._guided_decode_logits_processor(request, tokenizer))
 
-            prompt_inputs = self._tokenize_prompt_input(
-                request,
-                tokenizer,
-                prompt,
-                truncate_prompt_tokens=request.truncate_prompt_tokens,
-                add_special_tokens=request.add_special_tokens,
-            )
+            prompt_inputs = None
+
+            if isinstance(mm_data, dict) and "table" in mm_data:
+                table_input_ids = _table_tokenizer_insert(prompt, tokenizer)
+
+                prompt_inputs = TextTokensPrompt(
+                    prompt_token_ids=table_input_ids, prompt=prompt)
+
+            else:
+                prompt_inputs = self._tokenize_prompt_input(
+                    request,
+                    tokenizer,
+                    prompt,
+                    truncate_prompt_tokens=request.truncate_prompt_tokens,
+                    add_special_tokens=request.add_special_tokens,
+                )
 
             sampling_params = request.to_sampling_params(
                 tokenizer,

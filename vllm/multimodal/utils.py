@@ -1,7 +1,6 @@
 import base64
 from io import BytesIO
 from typing import Union
-
 from PIL import Image
 
 from vllm.connections import global_http_connection

@@ -29,8 +29,9 @@ from torch import nn
 from transformers import Qwen2Config
 
 from vllm.attention import Attention, AttentionMetadata
-from vllm.config import CacheConfig, LoRAConfig
+from vllm.config import CacheConfig, LoRAConfig, MultiModalConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
@@ -46,10 +47,16 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import IntermediateTensors, SamplerOutput
 
-from .interfaces import SupportsLoRA
+from .interfaces import SupportsLoRA, SupportsVision
+# For table encoder and projector
+from .qwen2tb_encoder import load_encoder,input_processor_for_qwen2tb_encoder
+from .qwen2tb_projector import MultiHeadProjector
 from .utils import is_pp_missing_parameter, make_layers
+
+# end
 
 
 class Qwen2MLP(nn.Module):
@@ -238,6 +245,7 @@ class Qwen2Model(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
             config.hidden_size,
+            quant_config=quant_config,
         )
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
@@ -289,7 +297,19 @@ class Qwen2Model(nn.Module):
         return hidden_states
 
 
-class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
+def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
+    multi_modal_data = llm_inputs.get("multi_modal_data")
+    if multi_modal_data is None or "table" not in multi_modal_data:
+        return llm_inputs
+
+    return input_processor_for_qwen2tb_encoder(ctx, llm_inputs)
+
+
+@MULTIMODAL_REGISTRY.register_table_input_mapper()
+@MULTIMODAL_REGISTRY.register_max_table_tokens()
+# @INPUT_REGISTRY.dummy_data_for_profiling()
+@INPUT_REGISTRY.register_input_processor(input_processor_for_table)
+class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsVision):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -315,6 +335,7 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
     def __init__(
         self,
         config: Qwen2Config,
+        multimodal_config: MultiModalConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
@@ -334,6 +355,7 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
         super().__init__()
 
         self.config = config
+        self.multimodal_config = multimodal_config
         self.lora_config = lora_config
 
         self.quant_config = quant_config
@@ -349,20 +371,71 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-    ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   attn_metadata, intermediate_tensors)
+        self.projector = None
+
+        if self.config.table_encoder:
+            self.projector = MultiHeadProjector(
+                **self.config.table_encoder["projector"])
+            
+            encoder_cfg = {
+                "model_path":self.config.name_or_path,
+                "subfolder":"encoder",
+                **self.config.table_encoder["encoder"]
+            }
+            self.encoder = load_encoder(encoder_cfg)
+
+    def _validate_get_table(self, **kwargs) -> torch.Tensor | None:
+
+        table = kwargs.pop("table", None)
+        if table is None or self.projector is None:
+            return None
+
+        self.projector.model.to(device=table.device, dtype=table.dtype)
+
+        return table
+
+    def forward(self,
+                input_ids: torch.Tensor,
+                positions: torch.Tensor,
+                kv_caches: List[torch.Tensor],
+                attn_metadata: AttentionMetadata,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                **kwargs: object) -> torch.Tensor:
+        table_embeds = self._validate_get_table(**kwargs)
+
+        if table_embeds is not None:
+
+            (
+                _,  # input ids
+                _,  # position ids but its None
+                _,  # attention_mask,
+                _,  # past_key_values,
+                inputs_embeds,
+                _,  # labels,
+            ) = self.projector.prepare_insert_embeds(
+                decoder=self.model,
+                input_ids=input_ids.unsqueeze(0),
+                table_embeds=table_embeds.unsqueeze(0),
+            )
+            input_ids = None
+            inputs_embeds = inputs_embeds.squeeze(0)
+
+        else:
+            inputs_embeds = None
+
+        hidden_states = self.model(input_ids,
+                                   positions,
+                                   kv_caches,
+                                   attn_metadata,
+                                   intermediate_tensors,
+                                   inputs_embeds=inputs_embeds)
         return hidden_states
 
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[torch.Tensor]:
         logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
         return logits
@@ -399,7 +472,30 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
+
         for name, loaded_weight in weights:
+            if name.startswith("encoder."):
+                name = name.split(".",maxsplit=1)[-1]
+                encoder_params_dict = dict(self.encoder.named_parameters())
+                param = encoder_params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                
+                weight_loader(param, loaded_weight)
+                continue
+
+            if name.startswith("projector."):
+                name = name.split(".",maxsplit=1)[-1]
+                projector_params_dict = dict(self.projector.named_parameters())
+                param = projector_params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                
+                weight_loader(param, loaded_weight)
+                continue
+
+            name = name.split("decoder.")[-1]
+
             if "rotary_emb.inv_freq" in name:
                 continue
             if self.config.tie_word_embeddings and "lm_head.weight" in name:
