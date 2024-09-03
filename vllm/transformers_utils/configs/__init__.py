@@ -25,6 +25,6 @@ __all__ = [
     "EAGLEConfig",
     "MLPSpeculatorConfig",
     "NemotronConfig",
-    "TableGPTConfig"
+    "TableGPTConfig",
     "UltravoxConfig",
 ]

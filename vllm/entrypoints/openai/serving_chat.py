@@ -1,5 +1,5 @@
-import inspect
 import asyncio
+import inspect
 import time
 from typing import AsyncGenerator, AsyncIterator, Dict, Final, List, Optional
 from typing import Sequence as GenericSequence
@@ -39,9 +39,8 @@ from vllm.utils import iterate_with_cancellation, random_uuid
 logger = init_logger(__name__)
 
 
-def _table_tokenizer_insert(prompt: str,
-                            tokenizer: PreTrainedTokenizer,
-                            model_config:ModelConfig) -> List[int]:
+def _table_tokenizer_insert(prompt: str, tokenizer: PreTrainedTokenizer,
+                            model_config: ModelConfig) -> List[int]:
     '''
     Tokenizes the input prompt by inserting a separator token 
     between each chunk of text.
@@ -57,8 +56,10 @@ def _table_tokenizer_insert(prompt: str,
        List[int]: The tokenized input prompt as a list of input IDs. 
 
     '''
-    insert_embeds_token = model_config.hf_config.encoder_config.insert_embs_token
-    insert_embeds_token_id = model_config.hf_config.encoder_config.insert_embs_token_id
+
+    encoder_config = model_config.hf_config.encoder_config
+    insert_embeds_token = encoder_config.insert_embs_token
+    insert_embeds_token_id = encoder_config.insert_embs_token_id
 
     prompt_chunks = [
         tokenizer(e,
@@ -80,8 +81,7 @@ def _table_tokenizer_insert(prompt: str,
         input_ids.append(prompt_chunks[0][0])
 
     for x in insert_separator(prompt_chunks,
-                              [insert_embeds_token_id] * 3 *
-                              (offset + 1)):
+                              [insert_embeds_token_id] * 3 * (offset + 1)):
         input_ids.extend(x[offset:])
     return input_ids
 
@@ -171,9 +171,10 @@ class OpenAIServingChat(OpenAIServing):
                 assert len(mm_futures) == 1, (
                     "Multiple 'table' | 'image_url' | 'audio_url'"
                     "input is currently not supported.")
-                mm_data = mm_futures[0]
-                if inspect.isawaitable(mm_data):
-                    mm_data = await mm_data
+                if inspect.isawaitable(mm_futures[0]):
+                    mm_data = await mm_futures[0]
+                else:
+                    mm_data = mm_futures[0]
 
         except Exception as e:
             logger.error("Error in loading multi-modal data: %s", e)
@@ -187,8 +188,8 @@ class OpenAIServingChat(OpenAIServing):
             prompt_inputs = None
 
             if isinstance(mm_data, dict) and "table" in mm_data:
-                # TODO: get some addtional tokens from model config
-                table_input_ids = _table_tokenizer_insert(prompt, tokenizer,self.model_config)
+                table_input_ids = _table_tokenizer_insert(
+                    prompt, tokenizer, self.model_config)
 
                 prompt_inputs = TextTokensPrompt(
                     prompt_token_ids=table_input_ids, prompt=prompt)

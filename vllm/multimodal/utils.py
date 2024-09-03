@@ -2,6 +2,7 @@ import base64
 from functools import lru_cache
 from io import BytesIO
 from typing import List, Optional, Tuple, TypeVar, Union
+
 import librosa
 import numpy as np
 import soundfile

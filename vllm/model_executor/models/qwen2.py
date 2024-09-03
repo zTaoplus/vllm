@@ -358,10 +358,13 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
         attn_metadata: AttentionMetadata,
         inputs_embeds: Optional[IntermediateTensors] = None,
         intermediate_tensors: Optional[IntermediateTensors] = None,
-        
     ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   attn_metadata, intermediate_tensors,inputs_embeds=inputs_embeds)
+        hidden_states = self.model(input_ids,
+                                   positions,
+                                   kv_caches,
+                                   attn_metadata,
+                                   intermediate_tensors,
+                                   inputs_embeds=inputs_embeds)
         return hidden_states
 
     def compute_logits(

@@ -184,16 +184,6 @@ class MultiModalRegistry:
         """
         return self.register_max_multimodal_tokens("table", max_mm_tokens)
 
-    def register_max_table_tokens(
-        self,
-        max_mm_tokens: Optional[MultiModalTokensCalc] = None,
-    ):
-        """
-        Register the maximum number of image tokens
-        input to the language model for a model class.
-        """
-        return self.register_max_multimodal_tokens("table", max_mm_tokens)
-
     def get_max_multimodal_tokens(self, model_config: ModelConfig) -> int:
         """
         Get the maximum number of multi-modal tokens

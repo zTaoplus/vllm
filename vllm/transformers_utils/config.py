@@ -15,7 +15,7 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                              JAISConfig, MedusaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, RWConfig,
-                                             UltravoxConfig,TableGPTConfig)
+                                             TableGPTConfig, UltravoxConfig)
 
 if VLLM_USE_MODELSCOPE:
     from modelscope import AutoConfig

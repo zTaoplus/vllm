@@ -1,12 +1,10 @@
 import codecs
+import inspect
 from dataclasses import dataclass
 from functools import lru_cache, partial
-from typing import (Awaitable, Iterable, List, Literal, Optional, Tuple, Union,
-                    cast)
-from functools import lru_cache
 from pathlib import Path
 from typing import (Any, Awaitable, Iterable, List, Literal, Optional, Tuple,
-                    Union)
+                    Union, cast)
 
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -19,11 +17,12 @@ from openai.types.chat import (
 # yapf: enable
 # pydantic needs the TypedDict from typing_extensions
 from pydantic import ConfigDict, TypeAdapter
-from typing_extensions import Required, TypeAlias, TypedDict
+from typing_extensions import Required, TypedDict
 
 from vllm.config import ModelConfig
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalDataDict
+from vllm.multimodal.base import Table
 from vllm.multimodal.utils import (async_get_and_parse_audio,
                                    async_get_and_parse_image)
 from vllm.transformers_utils.tokenizer import AnyTokenizer
@@ -51,16 +50,6 @@ class CustomChatCompletionContentPartParam(TypedDict, total=False):
     type: Required[str]
     """The type of the content part."""
 
-class TableCol(TypedDict, total=False):
-
-    name: Required[str]
-    dtype: Required[str]
-
-    # TODO: validate the length, can check the max length about the input csv value
-    values: Required[List]
-
-class Table(TypedDict, total=False):
-    columns: Required[List[TableCol]]
 
 class ChatCompletionContentPartTabularParam(TypedDict, total=False):
     tables: Required[List[Table]]
@@ -104,7 +93,7 @@ class ConversationMessage(TypedDict):
 @dataclass(frozen=True)
 class ChatMessageParseResult:
     messages: List[ConversationMessage]
-    mm_futures: List[Awaitable[MultiModalDataDict]]
+    mm_futures: List[Union[Awaitable[MultiModalDataDict], MultiModalDataDict]]
 
 
 def load_chat_template(
@@ -179,35 +168,35 @@ _AudioParser = TypeAdapter(ChatCompletionContentPartAudioParam)
 _TabularParser = TypeAdapter(ChatCompletionContentPartTabularParam)
 
 
-def __dataframe_info_simple(table: Table, model_config:ModelConfig) -> str:
+def __dataframe_info_simple(table: Table, model_config: ModelConfig) -> str:
 
     insert_embs_token = model_config.hf_config.encoder_config.insert_embs_token
     insert_seq_token = model_config.hf_config.encoder_config.insert_seq_token
 
-    placeholder_val = (insert_seq_token + insert_embs_token +
-            insert_seq_token)
-    
+    placeholder_val = (insert_seq_token + insert_embs_token + insert_seq_token)
+
     desc_info_lines = [
-        (f"- {placeholder_val} \'{col['name']}\' {col['dtype']}") for col in table["columns"]
+        (f"- {placeholder_val} \'{col['name']}\' {col['dtype']}")
+        for col in table["columns"]
     ]
 
     desc_info = "\n".join(desc_info_lines)
 
     return f"/*\nDataframe that can be used as follows:\n{desc_info}\n*/"
 
-def __build_table_question(tables: List[Table],model_config:ModelConfig):
+
+def __build_table_question(tables: List[Table], model_config: ModelConfig):
     pref = "## Details about the dataframes:\n\n"
-    
-    f = partial(__dataframe_info_simple,model_config=model_config)
-    
-    df_info_list = [
-        f(table) for table in tables
-    ]
+
+    f = partial(__dataframe_info_simple, model_config=model_config)
+
+    df_info_list = [f(table) for table in tables]
     return pref + '\n\n'.join(df_info_list)
 
 
-def _get_full_table_text_prompt(tables: List[Table],model_config:ModelConfig) -> str:
-    return __build_table_question(tables,model_config)
+def _get_full_table_text_prompt(tables: List[Table],
+                                model_config: ModelConfig) -> str:
+    return __build_table_question(tables, model_config)
 
 
 def _parse_chat_message_content_parts(
@@ -219,8 +208,8 @@ def _parse_chat_message_content_parts(
     texts: List[str] = []
     mm_futures: List[Union[Awaitable[MultiModalDataDict],
                            MultiModalDataDict]] = []
-    
-    modality: Literal["image", "audio","tabular"] = "image"
+
+    modality: Literal["image", "audio", "tabular"] = "image"
 
     for part in parts:
         part_type = part["type"]
@@ -248,9 +237,10 @@ def _parse_chat_message_content_parts(
                 raise NotImplementedError(
                     "Multiple 'table' input is currently not supported.")
 
-            table_data:List[Table] = _TabularParser.validate_python(part)["tables"]
+            table_data: List[Table] = _TabularParser.validate_python(
+                part)["tables"]
 
-            mm_futures.append({"table":table_data})
+            mm_futures.append({"table": table_data})
             modality = "tabular"
 
         elif part_type == "audio_url":
@@ -269,12 +259,17 @@ def _parse_chat_message_content_parts(
 
     if mm_futures:
         if modality == "tabular":
-            mm_data: MultiModalDataDict = mm_futures[0]
-            text_prompt = _get_full_table_text_prompt(mm_data["table"], model_config)
+            if inspect.isawaitable(mm_futures[0]):
+                raise ValueError("tabular table data cannot awaitable")
+
+            mm_data = mm_futures[0]
+
+            table = cast(List[Table], mm_data["table"])
+            text_prompt = _get_full_table_text_prompt(table, model_config)
 
         else:
             placeholder_token_str = _mm_token_str(model_config, tokenizer,
-                                                modality)
+                                                  modality)
             if placeholder_token_str is not None:
                 if placeholder_token_str in text_prompt:
                     logger.warning(
@@ -317,9 +312,11 @@ def parse_chat_messages(
     messages: List[ChatCompletionMessageParam],
     model_config: ModelConfig,
     tokenizer: AnyTokenizer,
-) -> Tuple[List[ConversationMessage], List[Awaitable[MultiModalDataDict]]]:
+) -> Tuple[List[ConversationMessage], List[Union[Awaitable[MultiModalDataDict],
+                                                 MultiModalDataDict]]]:
     conversation: List[ConversationMessage] = []
-    mm_futures: List[Awaitable[MultiModalDataDict]] = []
+    mm_futures: List[Union[Awaitable[MultiModalDataDict],
+                           MultiModalDataDict]] = []
 
     for msg in messages:
         parse_result = _parse_chat_message_content(msg, model_config,
