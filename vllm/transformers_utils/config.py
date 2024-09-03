@@ -15,7 +15,7 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                              JAISConfig, MedusaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, RWConfig,
-                                             UltravoxConfig)
+                                             UltravoxConfig,TableGPTConfig)
 
 if VLLM_USE_MODELSCOPE:
     from modelscope import AutoConfig
@@ -36,6 +36,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "eagle": EAGLEConfig,
     "internvl_chat": InternVLChatConfig,
     "nemotron": NemotronConfig,
+    "tablegpt": TableGPTConfig,
     "ultravox": UltravoxConfig,
 }
 
