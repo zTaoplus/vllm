@@ -158,6 +158,9 @@ def ff_encodings(x, B):
     return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
 
+def mask_fill_value(dtype=torch.float16):
+    return torch.finfo(dtype).min if dtype == torch.float16 else float("-1e10")
+
 # classes
 
 
@@ -232,7 +235,7 @@ class RowColAttention(nn.Module):
         if mask is not None:
             mask = mask.unsqueeze(1).unsqueeze(1).repeat(
                 1, sim.shape[1], sim.shape[2], 1, 1)
-            sim = sim.masked_fill(mask == 0, float("-1e10"))
+            sim = sim.masked_fill(mask == 0, mask_fill_value(sim.dtype))
 
         attn = sim.softmax(dim=-1)
         out = einsum('s b h i j, s b h j d -> s b h i d', attn, v)
@@ -269,7 +272,7 @@ class Attention(nn.Module):
         # torch.Size([12, 300, 300])
         if mask is not None:
             mask = (mask.unsqueeze(1).repeat(1, sim.shape[1], 1, 1))
-            sim = sim.masked_fill(mask == 0, float("-1e10"))
+            sim = sim.masked_fill(mask == 0, mask_fill_value(sim.dtype))
 
         attn = sim.softmax(dim=-1)
         out = einsum("b h i j, b h j d -> b h i d", attn, v)
@@ -305,7 +308,7 @@ class Qformer(nn.Module):
             mask = rearrange(mask, 's i j -> s j i')
             mask = mask[:, 0, :].unsqueeze(1).unsqueeze(1).unsqueeze(1).repeat(
                 1, sim.shape[1], sim.shape[2], sim.shape[3], 1)
-            sim = sim.masked_fill(mask == 0, float("-1e10"))
+            sim = sim.masked_fill(mask == 0, mask_fill_value(sim.dtype))
 
         attn = sim.softmax(dim=-1)
         out = einsum('s b h i j, s b h j d -> s b h i d', attn, v)
