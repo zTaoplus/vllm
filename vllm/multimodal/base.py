@@ -3,14 +3,14 @@ from abc import ABC, abstractmethod
 from collections import UserDict, defaultdict
 from typing import Callable, Dict, List, Mapping, Optional
 from typing import Sequence as GenericSequence
-from typing import Tuple, Type, TypedDict, TypeVar, Union, cast, final
+from typing import Tuple, Type, TypeVar, Union, cast, final
 
 import numpy as np
 import torch
 import torch.types
 from PIL import Image
 from torch import nn
-from typing_extensions import TypeAlias
+from typing_extensions import Required, TypeAlias, TypedDict
 
 from vllm.config import ModelConfig
 from vllm.inputs import InputContext
@@ -136,6 +136,9 @@ class MultiModalDataBuiltins(TypedDict, total=False):
 
     audio: MultiModalData[Tuple[np.ndarray, Union[int, float]]]
     """The input audio item(s) and corresponding sampling rate(s)."""
+
+    table: MultiModalData[str]
+    """The input table column(s) and corresponding sampling rate(s)."""
 
 
 MultiModalDataDict = Union[MultiModalDataBuiltins,

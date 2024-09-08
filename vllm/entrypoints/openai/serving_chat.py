@@ -5,6 +5,7 @@ from typing import Sequence as GenericSequence
 from typing import Union
 
 from fastapi import Request
+from transformers import PreTrainedTokenizer
 
 from vllm.config import ModelConfig
 from vllm.engine.protocol import AsyncEngineClient
@@ -22,7 +23,8 @@ from vllm.entrypoints.openai.protocol import (
     FunctionCall, ToolCall, UsageInfo)
 from vllm.entrypoints.openai.serving_engine import (LoRAModulePath,
                                                     OpenAIServing,
-                                                    PromptAdapterPath)
+                                                    PromptAdapterPath,
+                                                    TextTokensPrompt)
 from vllm.inputs import TokensPrompt
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalDataDict
@@ -34,6 +36,52 @@ from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.utils import iterate_with_cancellation, random_uuid
 
 logger = init_logger(__name__)
+
+
+def _table_tokenizer_insert(prompt: str, tokenizer: PreTrainedTokenizer,
+                            model_config: ModelConfig) -> List[int]:
+    '''
+    Tokenizes the input prompt by inserting a separator token 
+    between each chunk of text.
+
+    Args:
+        prompt (str): The input prompt to be tokenized. 
+                    It contains one or more instances of the 
+                    INSERT_EMBS_TOKEN.
+        tokenizer (transformers.PreTrainedTokenizer): 
+            The tokenizer object used for tokenization.
+
+    Returns:
+       List[int]: The tokenized input prompt as a list of input IDs. 
+
+    '''
+
+    placehoder_token = model_config.hf_config.placeholder_token
+    placehoder_token_id = model_config.hf_config.placeholder_token_id
+
+    prompt_chunks = [
+        tokenizer(e,
+                  padding="longest",
+                  max_length=tokenizer.model_max_length,
+                  truncation=True).input_ids
+        for e in prompt.split(placehoder_token)
+    ]
+
+    def insert_separator(X, sep):
+        return [ele for sublist in zip(X, [sep] * len(X))
+                for ele in sublist][:-1]
+
+    input_ids = []
+    offset = 0
+    if len(prompt_chunks) > 0 and len(prompt_chunks[0]) > 0 and prompt_chunks[
+            0][0] == tokenizer.bos_token_id:
+        offset = 1
+        input_ids.append(prompt_chunks[0][0])
+
+    for x in insert_separator(prompt_chunks,
+                              [placehoder_token_id] * 1 * (offset + 1)):
+        input_ids.extend(x[offset:])
+    return TextTokensPrompt(prompt_token_ids=input_ids,prompt=prompt)
 
 
 class OpenAIServingChat(OpenAIServing):
@@ -117,9 +165,9 @@ class OpenAIServingChat(OpenAIServing):
         try:
             if len(mm_futures):
                 # since we support only single mm data currently
-                assert len(
-                    mm_futures
-                ) == 1, "Multiple 'image_url' input is currently not supported."
+                assert len(mm_futures) == 1, (
+                    "Multiple 'table' | 'image_url' | 'audio_url'"
+                    "input is currently not supported.")
                 mm_data = await mm_futures[0]
         except Exception as e:
             logger.error("Error in loading multi-modal data: %s", e)
@@ -129,14 +177,18 @@ class OpenAIServingChat(OpenAIServing):
         try:
             guided_decode_logits_processor = (
                 await self._guided_decode_logits_processor(request, tokenizer))
-
-            prompt_inputs = self._tokenize_prompt_input(
-                request,
-                tokenizer,
-                prompt,
-                truncate_prompt_tokens=request.truncate_prompt_tokens,
-                add_special_tokens=request.add_special_tokens,
-            )
+            
+            if "table" in mm_data:
+                prompt_inputs = _table_tokenizer_insert(prompt,tokenizer,model_config)
+            
+            else:
+                prompt_inputs = self._tokenize_prompt_input(
+                    request,
+                    tokenizer,
+                    prompt,
+                    truncate_prompt_tokens=request.truncate_prompt_tokens,
+                    add_special_tokens=request.add_special_tokens,
+                )
 
             sampling_params = request.to_sampling_params(
                 tokenizer,

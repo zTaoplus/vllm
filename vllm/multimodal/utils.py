@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from functools import lru_cache
 from io import BytesIO
@@ -116,6 +117,12 @@ async def async_get_and_parse_audio(audio_url: str) -> MultiModalDataDict:
 async def async_get_and_parse_image(image_url: str) -> MultiModalDataDict:
     image = await async_fetch_image(image_url)
     return {"image": image}
+
+
+# mock await get table str
+async def async_get_and_parse_table(table: str) -> MultiModalDataDict:
+    await asyncio.sleep(0.1)
+    return {"table": table}
 
 
 def encode_audio_base64(

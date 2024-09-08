@@ -11,6 +11,7 @@ from vllm.transformers_utils.configs.medusa import MedusaConfig
 from vllm.transformers_utils.configs.mlp_speculator import MLPSpeculatorConfig
 from vllm.transformers_utils.configs.mpt import MPTConfig
 from vllm.transformers_utils.configs.nemotron import NemotronConfig
+from vllm.transformers_utils.configs.tablegpt import TableGPTConfig
 from vllm.transformers_utils.configs.ultravox import UltravoxConfig
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "EAGLEConfig",
     "MLPSpeculatorConfig",
     "NemotronConfig",
+    "TableGPTConfig",
     "UltravoxConfig",
 ]

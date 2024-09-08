@@ -16,13 +16,14 @@ from openai.types.chat import (
 # yapf: enable
 # pydantic needs the TypedDict from typing_extensions
 from pydantic import ConfigDict, TypeAdapter
-from typing_extensions import Required, TypeAlias, TypedDict
+from typing_extensions import Required, TypedDict
 
 from vllm.config import ModelConfig
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalDataDict
 from vllm.multimodal.utils import (async_get_and_parse_audio,
-                                   async_get_and_parse_image)
+                                   async_get_and_parse_image,
+                                   async_get_and_parse_table)
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 
 logger = init_logger(__name__)
@@ -49,9 +50,17 @@ class CustomChatCompletionContentPartParam(TypedDict, total=False):
     """The type of the content part."""
 
 
-ChatCompletionContentPartParam: TypeAlias = Union[
-    OpenAIChatCompletionContentPartParam, ChatCompletionContentPartAudioParam,
-    CustomChatCompletionContentPartParam, ]
+class ChatCompletionContentPartTabularParam(TypedDict, total=False):
+    table: Required[str]
+
+    type: Required[Literal["table"]]
+    """The type of the content part."""
+
+
+ChatCompletionContentPartParam = Union[OpenAIChatCompletionContentPartParam,
+                                       ChatCompletionContentPartAudioParam,
+                                       ChatCompletionContentPartTabularParam,
+                                       CustomChatCompletionContentPartParam]
 
 
 class CustomChatCompletionMessageParam(TypedDict, total=False):
@@ -114,7 +123,7 @@ def load_chat_template(
 
 @lru_cache(maxsize=None)
 def _mm_token_str(model_config: ModelConfig, tokenizer: AnyTokenizer,
-                  modality: Literal["image", "audio"]) -> Optional[str]:
+                  modality: Literal["image", "audio","tabular"]) -> Optional[str]:
     # TODO: Let user specify how to insert image tokens into prompt
     # (similar to chat template)
     model_type = model_config.hf_config.model_type
@@ -137,6 +146,8 @@ def _mm_token_str(model_config: ModelConfig, tokenizer: AnyTokenizer,
         if model_type == "ultravox":
             return "<|reserved_special_token_0|>"
         raise TypeError(f"Unknown model type: {model_type}")
+    elif modality == "tabular":
+        return model_config.hf_config.placeholder_token
     else:
         raise TypeError(f"Unknown modality: {modality}")
 
@@ -155,7 +166,7 @@ def _get_full_multimodal_text_prompt(placeholder_token_str: str,
 _TextParser = TypeAdapter(ChatCompletionContentPartTextParam)
 _ImageParser = TypeAdapter(ChatCompletionContentPartImageParam)
 _AudioParser = TypeAdapter(ChatCompletionContentPartAudioParam)
-
+_TabularParser = TypeAdapter(ChatCompletionContentPartTabularParam)
 
 def _parse_chat_message_content_parts(
     role: str,
@@ -165,7 +176,8 @@ def _parse_chat_message_content_parts(
 ) -> ChatMessageParseResult:
     texts: List[str] = []
     mm_futures: List[Awaitable[MultiModalDataDict]] = []
-    modality: Literal["image", "audio"] = "image"
+
+    modality: Literal["image", "audio","tabular"] = "image"
 
     for part in parts:
         part_type = part["type"]
@@ -187,6 +199,20 @@ def _parse_chat_message_content_parts(
 
             image_future = async_get_and_parse_image(image_url["url"])
             mm_futures.append(image_future)
+
+        elif part_type == "table":
+            if len(mm_futures) > 0:
+                raise NotImplementedError(
+                    "Multiple 'table' input is currently not supported.")
+
+            table_data = _TabularParser.validate_python(
+                part)["table"]
+            
+            table_str = async_get_and_parse_table(table_data)
+
+            mm_futures.append(table_str)
+            modality = "tabular"
+
         elif part_type == "audio_url":
             modality = "audio"
             if len(mm_futures) > 0:
@@ -202,6 +228,10 @@ def _parse_chat_message_content_parts(
     text_prompt = "\n".join(texts)
 
     if mm_futures:
+        
+        # if modality == "tabular":
+        #     return ChatMessageParseResult(messages=[], mm_futures=mm_futures)
+        
         placeholder_token_str = _mm_token_str(model_config, tokenizer,
                                               modality)
         if placeholder_token_str is not None:
