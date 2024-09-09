@@ -45,7 +45,7 @@ def get_embedded_table(table: Table, model_config: ModelConfig,
         anchor_table.tolist(),
         padding='max_length',
         truncation=True,
-        max_length=model_config.hf_config.encoder_max_length,
+        max_length=model_config.hf_config.encoder_config.encoder_max_length,
         return_tensors='pt')
     anchor_table = {
         k: v.reshape(anchor_row_num, num_cols, -1)
@@ -113,8 +113,6 @@ def get_encoder_output(tables: t.List[Table], model_config: ModelConfig,
                            anchor_table_token_type_ids, anchor_table_mask))
         del (anchor_table_input_ids, anchor_table_attention_mask,
              anchor_table_token_type_ids, anchor_table_mask)
-        torch.cuda.empty_cache()
-        gc.collect()
 
     cat_table_embeds = [[] for _ in range(len(table_count))]
     for i in range(len(table_count)):

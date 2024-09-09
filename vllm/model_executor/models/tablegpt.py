@@ -6,7 +6,6 @@ from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
-from transformers import PretrainedConfig
 
 from vllm.attention import AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig, MultiModalConfig
@@ -16,11 +15,11 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import IntermediateTensors, SamplerOutput
+from vllm.transformers_utils.configs import TableGPTConfig
 
 from .interfaces import SupportsMultiModal
 from .tablegpt_encoder import input_processor_for_qwen2tb_encoder, load_encoder
-from .tablegpt_projector import MultiHeadProjector
-from .utils import filter_weights, init_vllm_registered_model
+from .utils import filter_weights, init_vllm_registered_model,merge_multimodal_embeddings
 
 
 def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
@@ -38,7 +37,7 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
 
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: TableGPTConfig,
         multimodal_config: MultiModalConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
@@ -59,7 +58,25 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
             raise ValueError(
                 "table encoder configs cannot found in hf config.")
 
-        self.projector = MultiHeadProjector(self.config)
+        mlp_depth = self.config.projector_config.mlp_depth
+        encoder_hidden_size =  self.config.projector_config.encoder_hidden_size
+        decoder_hidden_size = self.config.projector_config.decoder_hidden_size
+        
+        num_heads = self.config.projector_config.num_heads
+        
+        if not self.config.projector_config.multihead:
+            num_heads = 1
+        
+        modules = [
+            nn.Linear(encoder_hidden_size, decoder_hidden_size * num_heads)
+        ]
+        for _ in range(1, mlp_depth):
+            modules.append(nn.GELU())
+            modules.append(
+                nn.Linear(decoder_hidden_size * num_heads,
+                            encoder_hidden_size * num_heads))
+        
+        self.projector = nn.Sequential(*modules)
 
         self.encoder = load_encoder(self.config)
 
@@ -68,8 +85,6 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
         table = kwargs.pop("table", None)
         if table is None or self.projector is None:
             return None
-
-        self.projector.model.to(device=table.device, dtype=table.dtype)
 
         return table
 
@@ -83,19 +98,18 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
         table_embeds = self._validate_get_table(**kwargs)
 
         if table_embeds is not None:
+            
+            cur_table_embeds = self.projector(table_embeds)
 
-            inputs_embeds = self.projector.prepare_insert_embeds(
-                decoder=self.language_model.model,
-                input_ids=input_ids,
-                table_embeds=table_embeds,
+            cur_input_embeds = self.language_model.model.get_input_embeddings(input_ids.clamp(min=0))
+
+            inputs_embeds = merge_multimodal_embeddings(
+                input_ids, cur_input_embeds,cur_table_embeds, self.config.encoder_config.insert_embs_token_id
             )
-            del table_embeds
-            torch.cuda.empty_cache()
-            gc.collect()
 
             input_ids = None
-
-            inputs_embeds = inputs_embeds.squeeze(0)
+            
+            del table_embeds, cur_table_embeds, cur_input_embeds
 
         else:
             inputs_embeds = None
@@ -143,6 +157,9 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
         proj_weights = filter_weights(proj_weights, "projector")
         proj_params_dict = dict(self.projector.named_parameters())
         for name, loaded_weight in proj_weights:
+            # should remove the model. prefix
+            name = name.replace("model.","")
+
             param = proj_params_dict[name]
             weight_loader = getattr(param, "weight_loader",
                                     default_weight_loader)
