@@ -182,16 +182,15 @@ def __dataframe_info_simple(table: Table, model_config: ModelConfig) -> str:
 
     desc_info = "\n".join(desc_info_lines)
 
-    return f"/*\nDataframe that can be used as follows:\n{desc_info}\n*/"
+    return f"{desc_info}\n"
 
 
 def __build_table_question(tables: List[Table], model_config: ModelConfig):
-    pref = "## Details about the dataframes:\n\n"
-
+    
     f = partial(__dataframe_info_simple, model_config=model_config)
 
     df_info_list = [f(table) for table in tables]
-    return pref + '\n\n'.join(df_info_list)
+    return ''.join(df_info_list)
 
 
 def _get_full_table_text_prompt(tables: List[Table],
@@ -265,7 +264,10 @@ def _parse_chat_message_content_parts(
             mm_data = mm_futures[0]
 
             table = cast(List[Table], mm_data["table"])
-            text_prompt = _get_full_table_text_prompt(table, model_config)
+            placeholder_token_str = _get_full_table_text_prompt(table, model_config)
+
+            text_prompt = _get_full_multimodal_text_prompt(placeholder_token_str=placeholder_token_str,
+                                                           text_prompt=text_prompt)
 
         else:
             placeholder_token_str = _mm_token_str(model_config, tokenizer,
