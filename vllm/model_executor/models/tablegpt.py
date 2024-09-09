@@ -21,9 +21,7 @@ from vllm.multimodal.utils import cached_get_tokenizer
 
 
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.utils import (filter_weights, 
-                                              init_vllm_registered_model,
-                                              merge_multimodal_embeddings)
+from vllm.model_executor.models.utils import filter_weights, init_vllm_registered_model
 from vllm.model_executor.models.codet5_encoder import CodeT5pModel
 
 
@@ -51,13 +49,14 @@ def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
     indices = torch.where(prompt_token_ids == placeholder_token_id)[0]
 
     new_prompt_token_ids = None
-    
-    if len(indices) > 0:
-        new_values = torch.tensor([placeholder_token_id] * max_length)
-        new_prompt_token_ids = torch.cat((prompt_token_ids[:indices[0]], new_values, prompt_token_ids[indices[0] + 1:]))
-        
+
     table_encoder_token_ids = tokenizer(multi_modal_data["table"], return_tensors="pt", truncation=True, max_length=max_length).input_ids
     
+        
+    if len(indices) > 0:
+        new_values = torch.tensor([placeholder_token_id] * table_encoder_token_ids.shape[-1])
+        new_prompt_token_ids = torch.cat((prompt_token_ids[:indices[0]], new_values, prompt_token_ids[indices[0] + 1:]))
+        
     return  LLMInputs(
         prompt_token_ids=new_prompt_token_ids.tolist() if new_prompt_token_ids is not None else prompt_token_ids.tolist(),
         multi_modal_data={"table":table_encoder_token_ids}
