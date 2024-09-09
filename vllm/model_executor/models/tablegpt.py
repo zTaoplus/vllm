@@ -1,12 +1,16 @@
 # coding=utf-8
 # Adapted from
+from array import array
 import gc
+import random
+import string
 import itertools
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple, Mapping
 
 import torch
 from torch import nn
 from transformers import PretrainedConfig
+import pandas as pd
 
 from vllm.attention import AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig, MultiModalConfig
@@ -16,6 +20,8 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import IntermediateTensors, SamplerOutput
+from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
+from vllm.transformers_utils.configs import TableGPTConfig
 
 from .interfaces import SupportsMultiModal
 from .tablegpt_encoder import input_processor_for_qwen2tb_encoder, load_encoder
@@ -31,8 +37,96 @@ def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
     return input_processor_for_qwen2tb_encoder(ctx, llm_inputs)
 
 
+
+def get_table_max_cols_rows(hf_config:TableGPTConfig) -> Tuple[int,int]:
+    max_rows = hf_config.encoder_config.max_rows
+    max_cols = hf_config.encoder_config.max_cols
+
+    return max_cols,max_rows
+
+def dummy_tabledata_for_tablegpt(
+    hf_config: TableGPTConfig,
+    num_tables: int,
+    table_max_rows: Optional[int] = None,
+    table_max_cols: Optional[int] = None,
+):
+    # make the table data mode
+    # generated a table from max rows, max cols and encoder max length(cell length)
+
+    def generate_random_text(length):
+        """生成一个固定长度的随机字符串"""
+        return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
+    # 创建一个包含随机文本的DataFrame
+    df = pd.DataFrame({
+        f'col_{i}': [generate_random_text(hf_config.encoder_max_length) for _ in range(table_max_cols)]
+        for i in range(table_max_rows)
+    })
+
+    # 转换成所需格式
+    table = [
+            {
+                "columns": [
+                    {
+                        "name": df.columns[i],
+                        "dtype": str(df.dtypes[i]),
+                        "values": df[df.columns[i]].tolist()
+                    }
+                    for i in range(len(df.columns))
+                ]
+            }
+        ]
+
+
+    return {"table": table}
+
+
+def dummy_seq_data_for_tablegpt(
+    hf_config: TableGPTConfig,
+    seq_len: int,
+    num_tables: int,
+):  
+    
+    encoder_config = hf_config.encoder_config
+
+    table_token_insert_id = encoder_config.insert_embs_token_id
+    encoder_table_max_col = encoder_config.max_cols
+
+    # this is the table placeholder tokens for contrastive(longlin) table encoder
+    token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                      [table_token_insert_id]) * 3 * encoder_table_max_col * num_tables
+    
+    # extend the token ids to max seq len
+    token_ids += array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - len(token_ids))
+    
+    return SequenceData(token_ids)
+
+
+
+def dummy_data_for_tablegpt(ctx: InputContext, seq_len: int,
+                         mm_counts: Mapping[str, int]):
+    
+    # 1, make prompt str?
+    # 2. use custom tokenize?
+    # or make the input token ids directly
+    num_tables = mm_counts["table"]
+    hf_config = ctx.model_config.hf_config
+
+    table_max_cols,table_max_rows = get_table_max_cols_rows()
+
+    
+    seq_data = dummy_seq_data_for_tablegpt(hf_config,ctx.model_config.max_model_len,num_tables)
+    
+    mm_data = ""
+
+    return seq_data, mm_data
+
+
 @MULTIMODAL_REGISTRY.register_table_input_mapper()
 @MULTIMODAL_REGISTRY.register_max_table_tokens()
+@INPUT_REGISTRY.register_dummy_data(dummy_data_for_tablegpt)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_table)
 class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
 

@@ -31,6 +31,7 @@ def get_embedded_table(table: Table, model_config: ModelConfig,
 
     df_col_count = len(table["columns"])
 
+    # todo: make the sample from tables
     tb = np.array([tb_col["values"] for tb_col in table["columns"]])
 
     _, num_cols = tb.shape[0], tb.shape[1]
