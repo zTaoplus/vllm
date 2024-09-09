@@ -7,7 +7,6 @@ from typing import Iterable, List, Optional, Tuple
 import torch
 from torch import nn
 from transformers import PretrainedConfig
-from transformers import AutoModel
 
 from vllm.attention import AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig, MultiModalConfig
@@ -21,7 +20,9 @@ from vllm.multimodal.utils import cached_get_tokenizer
 
 
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.utils import filter_weights, init_vllm_registered_model
+from vllm.model_executor.models.utils import (filter_weights, 
+                                              init_vllm_registered_model,
+                                              merge_multimodal_embeddings)
 from vllm.model_executor.models.codet5_encoder import CodeT5pModel
 
 
@@ -52,7 +53,6 @@ def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
 
     table_encoder_token_ids = tokenizer(multi_modal_data["table"], return_tensors="pt", truncation=True, max_length=max_length).input_ids
     
-        
     if len(indices) > 0:
         new_values = torch.tensor([placeholder_token_id] * table_encoder_token_ids.shape[-1])
         new_prompt_token_ids = torch.cat((prompt_token_ids[:indices[0]], new_values, prompt_token_ids[indices[0] + 1:]))
@@ -108,33 +108,11 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
         
         self.projector = nn.Sequential(*modules)
 
-    def _preprocess_table_embeddings(self, input_ids, table_embeds):
-
-        cur_input_embeds = self.language_model.model.get_input_embeddings(input_ids.clamp(min=0))
-
-        cur_table_embeds = self.projector(table_embeds) # forward through the projector
-
-        
-        mask = (input_ids == self.config.placeholder_token_id)
-        indices = torch.nonzero(mask).squeeze()
-
-        assert table_embeds.shape[0] == indices.shape[0], "Encoder embedding 行数应与 placeholder_token_id 的数量一致"
-
-        
-        # 依次替换 embedded_ids 中的 placeholder_token_id 部分
-        for i, index in enumerate(indices):
-            cur_input_embeds[index] = cur_table_embeds[i]
-
-
-        return cur_input_embeds
-    
     def _validate_get_table(self, **kwargs) -> torch.Tensor | None:
 
         table = kwargs.pop("table", None)
         if table is None or self.projector is None:
             return None
-
-        # self.projector.to(device=table.device, dtype=table.dtype)
 
         return table
 
@@ -148,12 +126,14 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
         table_encoder_input_ids = self._validate_get_table(**kwargs)
 
         if table_encoder_input_ids is not None:
-            # torch.Size([1, 512, 1024]) should no add batch size
+            
             table_embeds = self.encoder(input_ids=table_encoder_input_ids).last_hidden_state
+            cur_table_embeds = self.projector(table_embeds)
 
-            inputs_embeds = self._preprocess_table_embeddings(
-                input_ids=input_ids,
-                table_embeds=table_embeds.squeeze(0),
+            cur_input_embeds = self.language_model.model.get_input_embeddings(input_ids.clamp(min=0))
+            
+            inputs_embeds = merge_multimodal_embeddings(
+                input_ids,cur_input_embeds,cur_table_embeds,self.config.placeholder_token_id
             )
 
             del table_embeds
@@ -161,8 +141,6 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
             gc.collect()
 
             input_ids = None
-
-            # inputs_embeds = inputs_embeds.squeeze(0)
 
         else:
             inputs_embeds = None

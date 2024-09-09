@@ -178,7 +178,7 @@ class OpenAIServingChat(OpenAIServing):
             guided_decode_logits_processor = (
                 await self._guided_decode_logits_processor(request, tokenizer))
             
-            if "table" in mm_data:
+            if mm_data is not None and "table" in mm_data:
                 prompt_inputs = _table_tokenizer_insert(prompt,tokenizer,model_config)
             
             else:
