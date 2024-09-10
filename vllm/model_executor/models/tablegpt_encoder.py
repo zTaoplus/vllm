@@ -1,7 +1,11 @@
-import gc
+import string
+import random
 import typing as t
+from array import array
 
 import numpy as np
+import pandas as pd
+
 import torch
 from einops import rearrange
 from torch import einsum, nn
@@ -10,9 +14,11 @@ from transformers import (AutoModel, BertConfig, PretrainedConfig,
                           PreTrainedTokenizer)
 
 from vllm.config import ModelConfig
+from vllm.transformers_utils.configs import TableGPTConfig
 from vllm.entrypoints.chat_utils import Table
 from vllm.inputs import InputContext, LLMInputs
 from vllm.multimodal.utils import cached_get_tokenizer
+from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
 
 TABGPT_ENCODER = None
 
@@ -141,6 +147,95 @@ def input_processor_for_qwen2tb_encoder(ctx: InputContext,
 
     return LLMInputs(prompt_token_ids=llm_inputs["prompt_token_ids"],
                      multi_modal_data={"table": table_embeddings[0]})
+
+
+
+def get_table_max_cols_rows(hf_config:TableGPTConfig) -> t.Tuple[int,int]:
+    max_rows = hf_config.encoder_config.max_rows
+    max_cols = hf_config.encoder_config.max_cols
+
+    return max_cols,max_rows
+
+def dummy_tabledata_for_tablegpt(
+    model_config: ModelConfig,
+    table_max_rows: t.Optional[int] = None,
+    table_max_cols: t.Optional[int] = None,
+) -> t.Dict:
+
+    def generate_random_text(length:int) -> str:
+        """random string by length"""
+        return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
+    # random str set to col-row
+    df = pd.DataFrame({
+        f'col_{i}': [generate_random_text(model_config.hf_config.encoder_config.encoder_max_length) for _ in range(table_max_rows)]
+        for i in range(table_max_cols)
+    })
+
+    # to table dict
+    table = [
+            {
+                "columns": [
+                    {
+                        "name": df.columns[i],
+                        "dtype": str(df.dtypes[i]),
+                        "values": df[df.columns[i]].tolist()
+                    }
+                    for i in range(len(df.columns))
+                ]
+            }
+        ]
+
+    # encoder here?
+    tokenizer = cached_get_tokenizer(
+        model_config.model,
+        subfolder=model_config.hf_config.encoder_config.subfolder)
+
+    table_embeddings = get_encoder_output(table,
+                                    model_config=model_config,
+                                    tokenizer=tokenizer)
+
+    return {"table": table_embeddings[0]}
+
+
+def dummy_seq_data_for_tablegpt(
+    hf_config: TableGPTConfig,
+    seq_len: int
+):  
+    
+    encoder_config = hf_config.encoder_config
+
+    table_token_insert_id = encoder_config.insert_embs_token_id
+    encoder_table_max_col = encoder_config.max_cols
+
+    # this is the table placeholder tokens for contrastive(longlin) table encoder
+    token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                      [table_token_insert_id] * 3 * encoder_table_max_col)
+    
+    # extend the token ids to max seq len
+    token_ids += array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - len(token_ids))
+    
+    return SequenceData(token_ids)
+
+
+
+def dummy_data_for_tablegpt(ctx: InputContext, seq_len: int,
+                         mm_counts: t.Mapping[str, int]):
+    
+
+    # num_tables = mm_counts["table"]
+    hf_config = ctx.model_config.hf_config
+
+    table_max_cols,table_max_rows = get_table_max_cols_rows(hf_config)
+
+    
+    seq_data = dummy_seq_data_for_tablegpt(hf_config,ctx.model_config.max_model_len)
+    
+    mm_data = dummy_tabledata_for_tablegpt(ctx.model_config,table_max_rows,table_max_cols)
+
+    return seq_data, mm_data
 
 
 def exists(val):

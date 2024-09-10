@@ -1,6 +1,5 @@
 # coding=utf-8
 # Adapted from
-import gc
 import itertools
 from typing import Iterable, List, Optional, Tuple
 
@@ -14,13 +13,15 @@ from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
+
 from vllm.sequence import IntermediateTensors, SamplerOutput
 from vllm.transformers_utils.configs import TableGPTConfig
 
 from .interfaces import SupportsMultiModal
-from .tablegpt_encoder import input_processor_for_qwen2tb_encoder, load_encoder
+from .tablegpt_encoder import input_processor_for_qwen2tb_encoder, load_encoder, dummy_data_for_tablegpt
 from .utils import filter_weights, init_vllm_registered_model,merge_multimodal_embeddings
 
+_TABLE_TOKEN_COUNT_PER_COL = 3
 
 def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
     multi_modal_data = llm_inputs.get("multi_modal_data")
@@ -29,9 +30,21 @@ def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
 
     return input_processor_for_qwen2tb_encoder(ctx, llm_inputs)
 
+# TODO: shold add the max table counts for the encoder?
+def get_max_table_tokens(ctx: InputContext):
+
+    table_col_max_length = getattr(
+                    ctx.model_config.hf_config.encoder_config,
+                    "max_cols",
+                    100)
+    
+    return table_col_max_length * _TABLE_TOKEN_COUNT_PER_COL
+
+    
 
 @MULTIMODAL_REGISTRY.register_table_input_mapper()
-@MULTIMODAL_REGISTRY.register_max_table_tokens()
+@MULTIMODAL_REGISTRY.register_max_multimodal_tokens("table",get_max_table_tokens)
+@INPUT_REGISTRY.register_dummy_data(dummy_data_for_tablegpt)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_table)
 class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
 

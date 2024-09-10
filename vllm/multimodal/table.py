@@ -5,6 +5,7 @@ from vllm.logger import init_logger
 
 from .base import MultiModalInputs, MultiModalPlugin
 
+
 logger = init_logger(__name__)
 
 
@@ -23,4 +24,6 @@ class TablePlugin(MultiModalPlugin):
         return MultiModalInputs({"table": data})
 
     def _default_max_multimodal_tokens(self, ctx: InputContext) -> int:
-        return 3000
+        raise NotImplementedError(
+            "There is no default maximum multimodal tokens")
+
