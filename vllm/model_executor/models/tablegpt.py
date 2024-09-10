@@ -1,15 +1,18 @@
 # coding=utf-8
 # Adapted from
-import gc
+from array import array
 import itertools
-from typing import Iterable, List, Optional, Tuple
+import random
+import string
+from typing import Iterable, List, Optional, Tuple, Mapping,Dict
 
+import pandas as pd
 import torch
 from torch import nn
 from transformers import PretrainedConfig
 
 from vllm.attention import AttentionMetadata
-from vllm.config import CacheConfig, LoRAConfig, MultiModalConfig
+from vllm.config import CacheConfig, LoRAConfig, MultiModalConfig, ModelConfig
 from vllm.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
@@ -17,6 +20,8 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import IntermediateTensors, SamplerOutput
 from vllm.multimodal.utils import cached_get_tokenizer
+from vllm.transformers_utils.configs import TableGPTConfig
+from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
 
 
 from vllm.model_executor.models.interfaces import SupportsMultiModal
@@ -63,9 +68,71 @@ def input_processor_for_table(ctx: InputContext, llm_inputs: LLMInputs):
     )
 
 
+def get_max_table_tokens(ctx: InputContext) -> int:
+  
+    return ctx.model_config.hf_config.encoder_max_length
+
+def dummy_tabledata_for_tablegpt(
+    model_config: ModelConfig
+) -> Dict:
+
+    def generate_random_text(length:int) -> str:
+        """random string by length"""
+        return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+    encoder_max_lenth = model_config.hf_config.encoder_max_length
+
+    # df with random cell string,length:20, cols count:100, row count: 50
+    df = pd.DataFrame({
+        f'col_{i}': [generate_random_text(20) for _ in range(50)]
+        for i in range(100)
+    })
+
+
+    tokenizer = cached_get_tokenizer(model_config.model,
+                                     subfolder=model_config.hf_config.encoder_config.subfolder)
+
+    table_encoder_token_ids:torch.Tensor = tokenizer(df.to_markdown(), return_tensors="pt", truncation=True, max_length=encoder_max_lenth).input_ids
+    return {"table": table_encoder_token_ids}
+
+
+def dummy_seq_data_for_tablegpt(
+    hf_config: TableGPTConfig,
+    seq_len: int
+):  
+    
+    placeholder_token_id = hf_config.placeholder_token_id
+    encoder_max_length = hf_config.encoder_max_length
+
+    # this is the table placeholder tokens for contrastive(lly) table encoder
+    token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                      [placeholder_token_id] *  encoder_max_length)
+    
+    # extend the token ids to max seq len
+    token_ids += array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - len(token_ids))
+    
+    return SequenceData(token_ids)
+
+
+
+def dummy_data_for_tablegpt(ctx: InputContext, seq_len: int,
+                         mm_counts: Mapping[str, int]):
+    
+
+    # num_tables = mm_counts["table"]
+    hf_config = ctx.model_config.hf_config
+    
+    seq_data = dummy_seq_data_for_tablegpt(hf_config,ctx.model_config.max_model_len)
+    
+    mm_data = dummy_tabledata_for_tablegpt(ctx.model_config)
+
+    return seq_data, mm_data
+
 
 @MULTIMODAL_REGISTRY.register_table_input_mapper()
-@MULTIMODAL_REGISTRY.register_max_table_tokens()
+@MULTIMODAL_REGISTRY.register_max_multimodal_tokens("table",get_max_table_tokens)
+@INPUT_REGISTRY.register_dummy_data(dummy_data_for_tablegpt)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_table)
 class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
 
@@ -137,8 +204,6 @@ class TableGPTForCausalLM(nn.Module, SupportsMultiModal):
             )
 
             del table_embeds
-            torch.cuda.empty_cache()
-            gc.collect()
 
             input_ids = None
 
