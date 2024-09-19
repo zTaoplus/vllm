@@ -15,6 +15,8 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                              JAISConfig, MedusaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, RWConfig,
+                                             TableGPTContrastiveConfig, 
+                                             TableGPTMarkUpConfig,
                                              UltravoxConfig)
 
 if VLLM_USE_MODELSCOPE:
@@ -36,6 +38,8 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "eagle": EAGLEConfig,
     "internvl_chat": InternVLChatConfig,
     "nemotron": NemotronConfig,
+    "tablegpt_contrastive": TableGPTContrastiveConfig,
+    "tablegpt_markup":TableGPTMarkUpConfig,
     "ultravox": UltravoxConfig,
 }
 
