@@ -158,13 +158,20 @@ def _mm_token_str(model_config: ModelConfig, tokenizer: AnyTokenizer,
 
 # TODO: Let user specify how to insert multimodal tokens into prompt
 # (similar to chat template)
-def _get_full_multimodal_text_prompt(placeholder_token_str: str,
-                                     text_prompt: str) -> str:
+def _get_full_multimodal_text_prompt(
+    placeholder_token_str: str, text_prompt: str, text_prompt_prefix=False
+) -> str:
     """Combine multimodal prompts for a multimodal language model"""
 
     # NOTE: For now we assume all model architectures use the same
     # placeholder + text prompt format. This may change in the future.
-    return f"{placeholder_token_str}\n{text_prompt}"
+    return (
+        f"{text_prompt}\n{placeholder_token_str}"
+        if text_prompt_prefix
+        else f"{placeholder_token_str}\n{text_prompt}"
+    )
+
+
 
 
 _TextParser = TypeAdapter(ChatCompletionContentPartTextParam)
@@ -278,7 +285,8 @@ def _parse_chat_message_content_parts(
             placeholder_token_str = _get_full_table_text_prompt(table, model_config)
 
             text_prompt = _get_full_multimodal_text_prompt(placeholder_token_str=placeholder_token_str,
-                                                           text_prompt=text_prompt)
+                                                           text_prompt=text_prompt,
+                                                           text_prompt_prefix=True)
 
         else:
             placeholder_token_str = _mm_token_str(model_config, tokenizer,
