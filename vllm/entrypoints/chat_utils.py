@@ -1,4 +1,5 @@
 import codecs
+import re
 import inspect
 from dataclasses import dataclass
 from functools import lru_cache, partial
@@ -171,6 +172,26 @@ def _get_full_multimodal_text_prompt(
         else f"{placeholder_token_str}\n{text_prompt}"
     )
 
+def _get_full_tarbular_text_prompt(
+    placeholder_token_str: str, table_infos:List[str], text_prompt: str
+) -> str:
+    
+    occurrences = re.findall(re.escape(placeholder_token_str), text_prompt)
+    if len(occurrences) == 0:
+        return _get_full_multimodal_text_prompt(
+            placeholder_token_str="".join(table_infos),
+            text_prompt=text_prompt,
+            text_prompt_prefix=True
+        )
+    
+    if len(occurrences) != len(table_infos):
+        raise ValueError(f"The length of table_infos::List"
+                         f"must match the number of occurrences of "
+                         f"`{placeholder_token_str}`.")
+    
+    return re.sub(re.escape(placeholder_token_str), 
+           lambda match: table_infos.pop(0), 
+           text_prompt)
 
 
 
@@ -205,15 +226,18 @@ def __build_table_question(tables: Union[List[ColumnsTable] | List[MarkdownTable
     f = partial(__dataframe_info_simple, model_config=model_config)
 
     df_info_list = [f(table) for table in tables]
-    return ''.join(df_info_list)
+    return df_info_list
 
-
-def _get_full_table_text_prompt(tables: Union[List[ColumnsTable] | List[MarkdownTable]],
-                                model_config: ModelConfig) -> str:
+def _get_full_tables(tables: Union[List[ColumnsTable] | List[MarkdownTable]], 
+                     model_config: ModelConfig,
+                     return_text=True) -> str:
     
     # or use the model config to jugdes which table info be returned
-    return __build_table_question(tables, model_config)
-
+    return ("".join(__build_table_question(tables, model_config)) 
+            if return_text 
+            else 
+            __build_table_question(tables, model_config)
+    )
 
 def _parse_chat_message_content_parts(
     role: str,
@@ -281,12 +305,16 @@ def _parse_chat_message_content_parts(
 
             mm_data = mm_futures[0]
 
-            table = cast(Union[List[ColumnsTable] | List[MarkdownTable]], mm_data["table"])
-            placeholder_token_str = _get_full_table_text_prompt(table, model_config)
+            table = cast(Union[List[ColumnsTable] | List[MarkdownTable]], 
+                         mm_data["table"])
 
-            text_prompt = _get_full_multimodal_text_prompt(placeholder_token_str=placeholder_token_str,
-                                                           text_prompt=text_prompt,
-                                                           text_prompt_prefix=True)
+            table_info_lst= _get_full_tables(table, model_config,return_text=False)
+            
+            text_prompt = _get_full_tarbular_text_prompt(
+                placeholder_token_str="<TABLE_CONTENT>",
+                table_infos = table_info_lst,
+                text_prompt=text_prompt
+            )
 
         else:
             placeholder_token_str = _mm_token_str(model_config, tokenizer,
