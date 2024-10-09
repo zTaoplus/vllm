@@ -4,7 +4,8 @@
 
 ##  apply diff file (recommended in case of use only)
 # 1. pip install vllm==0.5.5
-# 2. git diff 09c7792610ada9f88bbf87d32b472dd44bf23cc2 HEAD | patch -p1 -d "$(pip show vllm | grep Location | awk '{print $2}')"
+# 2. cd vllm
+# 3. git diff 09c7792610ada9f88bbf87d32b472dd44bf23cc2 HEAD -- vllm | patch -p1 -d "$(pip show vllm | grep Location | awk '{print $2}')"
 
 ## build from source (dev recommended)
 ## Note: Building from source may take 10-30 minutes and requires access to GitHub or other repositories. Make sure to configure an HTTP/HTTPS proxy.
