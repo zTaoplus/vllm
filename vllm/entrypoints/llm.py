@@ -401,6 +401,71 @@ class LLM:
             lora_request=lora_request,
         )
 
+    def batch_chat(
+        self,
+        messages: List[List[ChatCompletionMessageParam]],
+        sampling_params: Optional[Union[SamplingParams,
+                                        List[SamplingParams]]] = None,
+        use_tqdm: bool = True,
+        lora_request: Optional[LoRARequest] = None,
+        chat_template: Optional[str] = None,
+        add_generation_prompt: bool = True,
+    ) -> List[RequestOutput]:
+        """Generates chat responses for a list of messages.
+
+        This method tokenizes the messages and calls the :meth:`generate`
+        method to produce responses.
+
+        Args:
+            messages: List of messages, where each message is a list of 
+                dictionaries with 'role' and 'content' keys.
+            sampling_params: Parameters for text generation; defaults apply if None.
+                Single values are applied universally, while a list must match the 
+                number of prompts for one-to-one pairing.
+            use_tqdm: Flag to display a progress bar using tqdm.
+            lora_request: Optional LoRA request for customization during generation.
+            chat_template: Optional template for structuring chat; defaults to 
+                model's template if not provided.
+            add_generation_prompt: If True, prepends a generation template to each message.
+
+        Returns:
+            List of ``RequestOutput`` objects with responses, ordered to match 
+            the input messages.
+        """
+        msg_check = messages[0]
+        if isinstance(msg_check,dict):
+            return [self.chat(
+                messages=messages,
+                sampling_params=sampling_params,
+                use_tqdm=use_tqdm,
+                lora_request=lora_request,
+                chat_template=chat_template,
+                add_generation_prompt=add_generation_prompt
+            )]
+        elif isinstance(msg_check,list):
+            prompts = []
+            
+            for msgs in messages:
+                tokenizer = self.get_tokenizer()
+                model_config = self.llm_engine.get_model_config()
+
+                conversations, _ = parse_chat_messages(msgs, model_config,
+                                                    tokenizer)
+
+                prompts.append(apply_chat_template(
+                    tokenizer,
+                    conversations,
+                    chat_template=chat_template,
+                    add_generation_prompt=add_generation_prompt)
+                )
+
+        return self.generate(
+            prompts,
+            sampling_params,
+            use_tqdm=use_tqdm,
+            lora_request=lora_request,
+        )
+
     @overload  # LEGACY: single (prompt + optional token ids)
     def encode(
         self,
