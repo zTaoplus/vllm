@@ -134,6 +134,9 @@ class TableCol(TypedDict, total=False):
 
     values: Required[List]
 
+    contains_nan: Required[bool] = False
+    is_unique: Required[bool] = False
+
 
 class ColumnsTable(TypedDict, total=False):
     columns: Required[List[TableCol]]
