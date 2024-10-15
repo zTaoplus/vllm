@@ -490,21 +490,33 @@ def build_messages_one_file_turn_from_csv_file(
 
     return messages
 
+def print_prompts(res):
+    print("------------------PROMPT Start----------------")
+    print(res[0].prompt)
+    print("------------------PROMPT END-----------------")
 
+    print("------------------PROMPT ID Start----------------")
+    print(res[0].prompt_token_ids)
+    print("------------------PROMPT ID END-----------------")
+
+    print("++++++++++++++++++++++++Response Start++++++++++++++++++++++++")
+    print(res[0].outputs[0].text)
+    print("++++++++++++++++++++++++Response End++++++++++++++++++++++++")
+  
 # NOTE: You can use your custom dataset loader, but note that the vllm.LLM cannot load multiple different models onto different GPUs within the same machine.
 result = []
 for csv_path, user_query in [
-    # (
-    #     (
-    #         "/root/workspace/vllm/spotify_tracks.csv",
-    #         "/root/workspace/vllm/TV_show_data_versionskz.csv",
-    #     ),
-    #     "查看时长最长的三首歌曲",
-    # ),
     (
-        "/root/workspace/vllm/TV_show_data_versionskz.csv",
-        "查看播放最好的电视剧类型",
+        (
+            "/root/workspace/vllm/spotify_tracks.csv",
+            "/root/workspace/vllm/TV_show_data_versionskz.csv",
+        ),
+        "查看时长最长的三首歌曲",
     ),
+    # (
+    #     "/root/workspace/vllm/TV_show_data_versionskz.csv",
+    #     "查看播放最好的电视剧类型",
+    # ),
 ]:
     if isinstance(csv_path, (list, tuple)):
         messages = build_messages_one_file_turn_from_csv_file(
@@ -512,27 +524,21 @@ for csv_path, user_query in [
         )
         res = model.chat(messages=messages, sampling_params=p)
         result.append(res)
+        print_prompts(res)
+        # messages = build_messages_multi_file_turn_from_csv_file(
+        #     csv_path, user_query, encoder_type=ENCODER_TYPE
+        # )
 
-        messages = build_messages_multi_file_turn_from_csv_file(
-            csv_path, user_query, encoder_type=ENCODER_TYPE
-        )
-
-        res = model.chat(messages=messages, sampling_params=p)
-        result.append(res)
+        # res = model.chat(messages=messages, sampling_params=p)
+        # print_prompts(res)
+        # result.append(res)
 
     elif isinstance(csv_path, str):
         messages = build_messages_multi_file_turn_from_csv_file(
             [csv_path], user_query, encoder_type=ENCODER_TYPE
         )
         res = model.chat(messages=messages, sampling_params=p)
-        print("------------------PROMPT Start----------------")
-        print(res[0].prompt)
-        print("------------------PROMPT END-----------------")
-
-
-        print("++++++++++++++++++++++++Response Start++++++++++++++++++++++++")
-        print(res[0].outputs[0].text)
-        print("++++++++++++++++++++++++Response End++++++++++++++++++++++++")
+        print_prompts(res)
         result.append(res)
     else:
         raise ValueError(
