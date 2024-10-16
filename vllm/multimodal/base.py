@@ -9,7 +9,7 @@ import torch
 import torch.types
 from PIL import Image
 from torch import nn
-from typing_extensions import TypeAlias
+from typing_extensions import TypeAlias, Required
 
 from vllm.config import ModelConfig
 from vllm.inputs import InputContext
@@ -128,6 +128,21 @@ The number of data instances allowed per modality is restricted by
 """
 
 
+class TableCol(TypedDict, total=False):
+
+    name: Required[str]
+    dtype: Required[str]
+
+    values: Required[List]
+
+    contains_nan: Required[bool] = False
+    is_unique: Required[bool] = False
+
+class ColumnsTable(TypedDict, total=False):
+    columns: Required[TableCol]
+
+MarkdownTable: TypeAlias = str
+
 @final
 class MultiModalDataBuiltins(TypedDict, total=False):
     """Modality types that are predefined by vLLM."""
@@ -137,6 +152,9 @@ class MultiModalDataBuiltins(TypedDict, total=False):
 
     audio: MultiModalData[Tuple[np.ndarray, Union[int, float]]]
     """The input audio item(s) and corresponding sampling rate(s)."""
+
+    table: MultiModalData[Union[ColumnsTable , MarkdownTable]]
+    """The input table column(s) and corresponding sampling rate(s)."""
 
 
 MultiModalDataDict = Union[MultiModalDataBuiltins,

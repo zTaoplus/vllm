@@ -11,6 +11,7 @@ from vllm.connections import global_http_connection
 from vllm.envs import VLLM_AUDIO_FETCH_TIMEOUT, VLLM_IMAGE_FETCH_TIMEOUT
 from vllm.logger import init_logger
 from vllm.multimodal.base import MultiModalDataDict
+from vllm.multimodal.base import ColumnsTable,MarkdownTable
 from vllm.transformers_utils.tokenizer import AnyTokenizer, get_tokenizer
 
 logger = init_logger(__name__)
@@ -121,6 +122,33 @@ async def async_fetch_audio(
     return librosa.load(BytesIO(audio_bytes), sr=None)
 
 
+def fetch_table(table: Any) -> Union[ColumnsTable,MarkdownTable]:
+
+    if not isinstance(table,str):
+        return table
+    
+    if table.startswith("http"):
+        table_raw = global_http_connection.get_bytes(
+            table, timeout=VLLM_IMAGE_FETCH_TIMEOUT)
+        return table_raw.decode("utf-8")
+    else:
+        raise ValueError("Invalid 'table'")
+
+
+
+async def async_fetch_table(table: str) -> Union[ColumnsTable,MarkdownTable]:
+    if not isinstance(table,str):
+        return table
+    
+    if table.startswith("http"):
+        table_raw = await global_http_connection.async_get_bytes(
+            table, timeout=VLLM_IMAGE_FETCH_TIMEOUT)
+        return table_raw.decode("utf-8")
+    else:
+        raise ValueError("Invalid 'table'")
+
+
+
 def get_and_parse_audio(audio_url: str) -> MultiModalDataDict:
     audio, sr = fetch_audio(audio_url)
     return {"audio": (audio, sr)}
@@ -131,6 +159,11 @@ def get_and_parse_image(image_url: str) -> MultiModalDataDict:
     return {"image": image}
 
 
+def get_and_parse_table(table: str) -> MultiModalDataDict:
+    _table = fetch_table(table)
+    return {"table": _table}
+
+
 async def async_get_and_parse_audio(audio_url: str) -> MultiModalDataDict:
     audio, sr = await async_fetch_audio(audio_url)
     return {"audio": (audio, sr)}
@@ -139,6 +172,10 @@ async def async_get_and_parse_audio(audio_url: str) -> MultiModalDataDict:
 async def async_get_and_parse_image(image_url: str) -> MultiModalDataDict:
     image = await async_fetch_image(image_url)
     return {"image": image}
+
+async def async_get_and_parse_table(table: str) -> MultiModalDataDict:
+    _table = await async_fetch_table(table)
+    return {"table": _table}
 
 
 def encode_audio_base64(

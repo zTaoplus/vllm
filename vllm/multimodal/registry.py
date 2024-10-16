@@ -9,6 +9,7 @@ from .audio import AudioPlugin
 from .base import (MultiModalDataDict, MultiModalInputMapper, MultiModalInputs,
                    MultiModalPlugin, MultiModalTokensCalc, NestedTensors)
 from .image import ImagePlugin
+from .table import TablePlugin
 from .video import VideoPlugin
 
 logger = init_logger(__name__)
@@ -35,7 +36,8 @@ class MultiModalRegistry:
     :class:`~vllm.multimodal.MultiModalPlugin` for each modality.
     """
 
-    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin(), VideoPlugin())
+    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin(), 
+                       VideoPlugin(), TablePlugin())
 
     def __init__(
             self,
@@ -176,6 +178,7 @@ class MultiModalRegistry:
         image, that are passed to the language model for a model class.
         """
         return self.register_max_multimodal_tokens("image", max_mm_tokens)
+
 
     def get_max_multimodal_tokens(self, model_config: ModelConfig) -> int:
         """

@@ -118,6 +118,10 @@ _MULTIMODAL_MODELS = {
     "UltravoxModel": ("ultravox", "UltravoxModel"),
     # [Encoder-decoder]
     "MllamaForConditionalGeneration": ("mllama", "MllamaForConditionalGeneration"),  # noqa: E501
+    "TableGPTContrastiveForCausalLM": ("tablegpt", 
+                                       "TableGPTContrastiveForCausalLM"),
+    "TableGPTMarkupForCausalLM": ("tablegpt", 
+                                  "TableGPTMarkupForCausalLM")
 }
 
 _SPECULATIVE_DECODING_MODELS = {
