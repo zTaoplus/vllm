@@ -134,8 +134,8 @@ class TableCol(TypedDict, total=False):
 
     values: Required[List]
 
-    contains_nan: Required[bool] = False
-    is_unique: Required[bool] = False
+    contains_nan = False
+    is_unique = False
 
 
 class ColumnsTable(TypedDict, total=False):
