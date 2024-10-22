@@ -24,6 +24,8 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, NVLM_D_Config,
                                              Qwen2VLConfig, RWConfig,
+                                             TableGPTContrastiveConfig, 
+                                             TableGPTMarkUpConfig,
                                              SolarConfig, UltravoxConfig)
 # yapf: enable
 from vllm.transformers_utils.utils import check_gguf_file
@@ -56,6 +58,8 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "nemotron": NemotronConfig,
     "NVLM_D": NVLM_D_Config,
     "solar": SolarConfig,
+    "tablegpt_contrastive": TableGPTContrastiveConfig,
+    "tablegpt_markup":TableGPTMarkUpConfig,
     "ultravox": UltravoxConfig,
     "qwen2_vl": Qwen2VLConfig,
     **_CONFIG_REGISTRY_OVERRIDE_HF

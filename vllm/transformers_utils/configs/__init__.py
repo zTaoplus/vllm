@@ -17,6 +17,7 @@ from vllm.transformers_utils.configs.nvlm_d import NVLM_D_Config
 from vllm.transformers_utils.configs.qwen2vl import (Qwen2VLConfig,
                                                      Qwen2VLVisionConfig)
 from vllm.transformers_utils.configs.solar import SolarConfig
+from vllm.transformers_utils.configs.tablegpt import TableGPTContrastiveConfig, TableGPTMarkUpConfig
 from vllm.transformers_utils.configs.ultravox import UltravoxConfig
 
 __all__ = [
@@ -34,6 +35,8 @@ __all__ = [
     "NemotronConfig",
     "NVLM_D_Config",
     "SolarConfig",
+    "TableGPTContrastiveConfig",
+    "TableGPTMarkUpConfig",
     "UltravoxConfig",
     "Qwen2VLConfig",
     "Qwen2VLVisionConfig",
