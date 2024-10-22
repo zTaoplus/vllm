@@ -52,7 +52,7 @@ def get_max_contrastive_table_tokens(ctx: InputContext):
 
 @MULTIMODAL_REGISTRY.register_table_input_mapper()
 @MULTIMODAL_REGISTRY.register_max_multimodal_tokens("table",get_max_contrastive_table_tokens)
-# @INPUT_REGISTRY.register_dummy_data(dummy_data_for_contrastive_tablegpt)
+@INPUT_REGISTRY.register_dummy_data(dummy_data_for_contrastive_tablegpt)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_contrastive_table)
 class TableGPTContrastiveForCausalLM(nn.Module, SupportsMultiModal):
 

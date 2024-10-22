@@ -48,7 +48,7 @@ def get_embedded_table(table: ColumnsTable, model_config: ModelConfig,
     anchor_row_num = tb.shape[0]
     anchor_table = tb.reshape(-1)
     anchor_table = tokenizer(
-        anchor_table.tolist(),
+        anchor_table.astype(str).tolist(),
         padding='max_length',
         truncation=True,
         max_length=model_config.hf_config.encoder_config.encoder_max_length,
@@ -231,7 +231,7 @@ def dummy_data_for_contrastive_tablegpt(ctx: InputContext, seq_len: int,
     table_max_cols,table_max_rows = get_table_max_cols_rows(hf_config)
 
     
-    seq_data = dummy_seq_data_for_contrastive_tablegpt(hf_config,ctx.model_config.max_model_len)
+    seq_data = dummy_seq_data_for_contrastive_tablegpt(hf_config,seq_len)
     
     mm_data = dummy_tabledata_for_contrastive_tablegpt(ctx.model_config,table_max_rows,table_max_cols)
 
