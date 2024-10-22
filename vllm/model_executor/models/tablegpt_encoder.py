@@ -54,7 +54,7 @@ def get_embedded_table(
     anchor_row_num = tb.shape[0]
     anchor_table = tb.reshape(-1)
     anchor_table = tokenizer(
-        anchor_table.tolist(),
+        anchor_table.astype(str).tolist(),
         padding="max_length",
         truncation=True,
         max_length=model_config.hf_config.encoder_config.encoder_max_length,

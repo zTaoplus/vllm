@@ -475,18 +475,20 @@ def __dataframe_info_simple(
         n = col["name"]
         tp = col["dtype"] + ","
         isu = ""
-        if col["is_unique"]:
+        if col.get("is_unique"):
             isu = "is unique,"
-        if "float" in tp or "int" in tp:
+
+        if isu and ("float" in tp or "int" in tp):
             isu = ""
 
         unique_col_vals = set(col["values"])
 
-        ctn = "contains NaN," if col["contains_nan"] else ""
+        ctn = "contains NaN," if col.get("contains_nan") else ""
         expval_prefx = "Example Values: "
         expval = str(
             random.sample(
-                list(unique_col_vals), min(len(unique_col_vals), max_example_values)
+                list(unique_col_vals),
+                min(len(unique_col_vals), max_example_values),
             )
         )
 
@@ -518,14 +520,13 @@ def _get_full_tables(
     return_text=True,
 ) -> str:
     # or use the model config to jugdes which table info be returned
-    if not isinstance(tables,list):
+    if not isinstance(tables, list):
         tables = [tables]
     return (
         "".join(__build_table_question(tables, model_config))
         if return_text
         else __build_table_question(tables, model_config)
     )
-
 
 
 def _get_full_tarbular_text_prompt(
@@ -590,7 +591,7 @@ def _parse_chat_message_content_parts(
             texts.append(text)
         elif part_type == "table":
             table = _TabularParser(part)["table"]
-
+            # TODO: 
             texts.append("<TABLE_CONTENT>")
             mm_parser.parse_table(table)
             has_tabular = True
@@ -616,21 +617,23 @@ def _parse_chat_message_content_parts(
         mm_placeholder_counts = mm_parser.mm_placeholder_counts()
 
         if mm_placeholder_counts:
-            text_prompt = _get_full_multimodal_text_prompt(
-                mm_placeholder_counts, text_prompt
-            )
+            if has_tabular:
+                mm_data = mm_tracker.all_mm_data()
 
-        if has_tabular:
-            mm_data = mm_tracker.all_mm_data()
+                table_info_lst = _get_full_tables(
+                    mm_data["table"], mm_tracker._model_config, return_text=False
+                )
+                text_prompt = _get_full_tarbular_text_prompt(
+                    placeholder_token_str="<TABLE_CONTENT>",
+                    table_infos=table_info_lst,
+                    text_prompt=text_prompt,
+                )
+            else:
+                text_prompt = _get_full_multimodal_text_prompt(
+                    mm_placeholder_counts, text_prompt
+                )
 
-            table_info_lst = _get_full_tables(
-                mm_data["table"], mm_tracker._model_config, return_text=False
-            )
-            text_prompt = _get_full_tarbular_text_prompt(
-                placeholder_token_str="<TABLE_CONTENT>",
-                table_infos=table_info_lst,
-                text_prompt=text_prompt,
-            )
+       
         return [ConversationMessage(role=role, content=text_prompt)]
 
 
@@ -761,7 +764,8 @@ def apply_mistral_chat_template(
 ) -> List[int]:
     if chat_template is not None:
         logger.warning(
-            "'chat_template' cannot be overridden for mistral tokenizer.")
+            "'chat_template' cannot be overridden for mistral tokenizer."
+        )
     if "add_generation_prompt" in kwargs:
         logger.warning(
             "'add_generation_prompt' is not supported for mistral tokenizer, "
