@@ -43,14 +43,22 @@ def get_embedded_table(
 
     df_col_count = len(table["columns"])
 
-    tb = np.array([tb_col["values"] for tb_col in table["columns"]])
+    tbs = []
+    for tb_col in table["columns"]:
+        vals = tb_col["values"]
+        if not vals:
+            # fill the pad token
+            vals = [tokenizer.pad_token]
+        tbs.append(vals)
+
+    tb = np.array(tbs)
 
     _, num_cols = tb.shape[0], tb.shape[1]
 
     if num_cols > table_max_rows:
         tb = tb[:, np.random.choice(num_cols, table_max_rows, replace=False)]
         num_cols = table_max_rows
-
+    
     anchor_row_num = tb.shape[0]
     anchor_table = tb.reshape(-1)
     anchor_table = tokenizer(
@@ -59,6 +67,7 @@ def get_embedded_table(
         truncation=True,
         max_length=model_config.hf_config.encoder_config.encoder_max_length,
         return_tensors="pt",
+        # TODO: Should we consider setting add_special_tokens=False?
     )
     anchor_table = {
         k: v.reshape(anchor_row_num, num_cols, -1)
@@ -105,9 +114,9 @@ def get_encoder_output(
     model_config: ModelConfig,
     tokenizer: PreTrainedTokenizer,
 ):
-    if not isinstance(tables,list):
+    if not isinstance(tables, list):
         tables = [tables]
-    
+
     table_count = [len(tables)]
 
     column_count = []

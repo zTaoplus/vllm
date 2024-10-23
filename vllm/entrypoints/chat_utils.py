@@ -501,7 +501,7 @@ def __dataframe_info_simple(
 
     desc_info = "\n".join(desc_info_lines)
 
-    return f"{desc_info}\n"
+    return f"{desc_info}"
 
 
 def __build_table_question(
@@ -591,7 +591,7 @@ def _parse_chat_message_content_parts(
             texts.append(text)
         elif part_type == "table":
             table = _TabularParser(part)["table"]
-            # TODO: 
+            # TODO:
             texts.append("<TABLE_CONTENT>")
             mm_parser.parse_table(table)
             has_tabular = True
@@ -615,13 +615,19 @@ def _parse_chat_message_content_parts(
         return [ConversationMessage(role=role, content=role_content)]  # type: ignore
     else:
         mm_placeholder_counts = mm_parser.mm_placeholder_counts()
-
+        # mm_placeholder_counts
         if mm_placeholder_counts:
+            table_count = mm_placeholder_counts["<TABLE_CONTENT>"]
             if has_tabular:
                 mm_data = mm_tracker.all_mm_data()
+                tables = mm_data["table"]
+                if not isinstance(tables, list):
+                    tables = [tables]
 
                 table_info_lst = _get_full_tables(
-                    mm_data["table"], mm_tracker._model_config, return_text=False
+                    tables[-table_count:],
+                    mm_tracker._model_config,
+                    return_text=False,
                 )
                 text_prompt = _get_full_tarbular_text_prompt(
                     placeholder_token_str="<TABLE_CONTENT>",
@@ -633,7 +639,6 @@ def _parse_chat_message_content_parts(
                     mm_placeholder_counts, text_prompt
                 )
 
-       
         return [ConversationMessage(role=role, content=text_prompt)]
 
 
