@@ -468,10 +468,22 @@ def __dataframe_info_simple(
     insert_embs_token = model_config.hf_config.encoder_config.insert_embs_token
     insert_seq_token = model_config.hf_config.encoder_config.insert_seq_token
 
+    max_cols = model_config.hf_config.encoder_config.max_cols
+
     placeholder_val = insert_seq_token + insert_embs_token + insert_seq_token
 
     desc_info_lines = []
-    for col in table["columns"]:
+    tables_sampled = table["columns"]
+    if max_cols < len(table["columns"]):
+        print(f"""The model supports a maximum of {max_cols} columns, 
+but {len(table['columns'])} were received. 
+Currently, {max_cols} records have been sampled to continue the process. 
+If the results are unsatisfactory, 
+please ensure that the length of the columns in the table is ≤ {max_cols}""")
+
+        tables_sampled = random.sample(table["columns"], max_cols)
+
+    for col in tables_sampled:
         n = col["name"]
         tp = col["dtype"] + ","
         isu = ""

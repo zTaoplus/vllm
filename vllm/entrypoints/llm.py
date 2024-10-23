@@ -607,10 +607,8 @@ class LLM:
             if is_list_of(prompt_data, int):
                 prompt = TokensPrompt(prompt_token_ids=prompt_data)
             else:
-                from vllm.multimodal import MultiModalDataDict
-
                 if (
-                    isinstance(mm_data, MultiModalDataDict)
+                    isinstance(mm_data, Dict)
                     and "table" in mm_data
                 ):
                     from vllm.entrypoints.openai.serving_chat import (
