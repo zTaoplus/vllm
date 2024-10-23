@@ -37,28 +37,30 @@ def get_embedded_table(
     table: ColumnsTable,
     model_config: ModelConfig,
     tokenizer: PreTrainedTokenizer,
+    ctx_table_max_cols: int,
+    ctx_table_max_rows: int,
 ):
-    table_max_rows = model_config.hf_config.encoder_config.max_rows
-    table_max_cols = model_config.hf_config.encoder_config.max_cols
-
+    table_max_rows = ctx_table_max_rows
+    table_max_cols = ctx_table_max_cols
+    
     df_col_count = len(table["columns"])
 
-    tbs = []
+    tb_vals = []
     for tb_col in table["columns"]:
         vals = tb_col["values"]
         if not vals:
             # fill the pad token
             vals = [tokenizer.pad_token]
-        tbs.append(vals)
+        tb_vals.append(vals)
 
-    tb = np.array(tbs)
+    tb = np.array(tb_vals)
 
     _, num_cols = tb.shape[0], tb.shape[1]
 
-    if num_cols > table_max_rows:
-        tb = tb[:, np.random.choice(num_cols, table_max_rows, replace=False)]
-        num_cols = table_max_rows
-    
+    if num_cols > table_max_cols:
+        tb = tb[:, np.random.choice(num_cols, table_max_cols, replace=False)]
+        num_cols = table_max_cols
+
     anchor_row_num = tb.shape[0]
     anchor_table = tb.reshape(-1)
     anchor_table = tokenizer(
@@ -121,6 +123,24 @@ def get_encoder_output(
 
     column_count = []
     table_embeds = []
+
+    ctx_table_max_cols = 1
+
+    ctx_table_max_rows = 1
+
+    for table in tables:
+        ctx_table_max_cols = min(
+            max(ctx_table_max_cols, len(table["columns"])),
+            model_config.hf_config.encoder_config.max_cols,
+        )
+        ctx_table_max_rows = min(
+            max(
+                ctx_table_max_rows,
+                max(len(col["values"]) for col in table["columns"]),
+            ),
+            model_config.hf_config.encoder_config.max_rows,
+        )
+
     for table_list in [tables]:
         anchor_table_input_ids = []
         anchor_table_attention_mask = []
@@ -128,7 +148,13 @@ def get_encoder_output(
         anchor_table_mask = []
         cur_column_count = []
         for table in table_list:
-            p, q, r, s, cnt = get_embedded_table(table, model_config, tokenizer)
+            p, q, r, s, cnt = get_embedded_table(
+                table,
+                model_config,
+                tokenizer,
+                ctx_table_max_cols,
+                ctx_table_max_rows,
+            )
             cur_column_count.append(cnt)
             anchor_table_input_ids.append(p)
             anchor_table_attention_mask.append(q)
