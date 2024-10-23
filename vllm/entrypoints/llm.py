@@ -532,7 +532,7 @@ class LLM:
         to the OpenAI API.
 
         Args:
-            messages: A list of conversations or a single conversation. 
+            messages: A list of conversations or a single conversation.
                 - Each conversation is represented as a list of messages.
                 - Each message is a dictionary with 'role' and 'content' keys.
             sampling_params: The sampling parameters for text generation.
@@ -561,8 +561,9 @@ class LLM:
         # Handle multi and single conversations
         if is_list_of(messages, list):
             # messages is List[List[...]]
-            list_of_messages = cast(List[List[ChatCompletionMessageParam]],
-                                    messages)
+            list_of_messages = cast(
+                List[List[ChatCompletionMessageParam]], messages
+            )
         else:
             # messages is List[...]
             list_of_messages = [
@@ -579,7 +580,8 @@ class LLM:
             # handle mm_processor_kwargs, since there is no implementation in
             # the chat message parsing for it.
             conversation, mm_data = parse_chat_messages(
-                msgs, model_config, tokenizer)
+                msgs, model_config, tokenizer
+            )
 
             prompt_data: Union[str, List[int]]
             if isinstance(tokenizer, MistralTokenizer):
@@ -605,10 +607,16 @@ class LLM:
             if is_list_of(prompt_data, int):
                 prompt = TokensPrompt(prompt_token_ids=prompt_data)
             else:
-                if "table" in mm_data:
+                from vllm.multimodal import MultiModalDataDict
+
+                if (
+                    isinstance(mm_data, MultiModalDataDict)
+                    and "table" in mm_data
+                ):
                     from vllm.entrypoints.openai.serving_chat import (
                         _table_tokenizer_insert,
                     )
+
                     print("------------------PROMPT Start----------------")
                     print(prompt_data)
                     print("------------------PROMPT END-----------------")
