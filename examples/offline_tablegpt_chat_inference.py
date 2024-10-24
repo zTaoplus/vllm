@@ -37,7 +37,7 @@ model = LLM(
     max_model_len=8192,
     max_num_seqs=2,
     dtype="bfloat16",
-    limit_mm_per_prompt={"table": 3},
+    limit_mm_per_prompt={"table": 5},
 )
 
 p = SamplingParams(temperature=0, max_tokens=2048)
@@ -166,7 +166,7 @@ Python code: Provide the Python code, wrapped in ```python ... ```.
         tabular_part.append(
             {
                 "type": "text",
-                "text": f"/* Details about the df_{idx} other info as follows:\n",
+                "text": f"/* Details about the df_{idx} other info as follows:\n<TABLE_CONTENT>\n*/",
             }
         )
         tabular_part.append(
@@ -177,7 +177,7 @@ Python code: Provide the Python code, wrapped in ```python ... ```.
                 else extract_markup_table(df),
             }
         )
-        tabular_part.append({"type": "text", "text": "*/"})
+        # tabular_part.append({"type": "text", "text": ""})
 
     tabular_part.append({"type": "text", "text": f"Questions: {query}"})
 
@@ -251,7 +251,7 @@ Python code: Provide the Python code, wrapped in ```python ... ```.
             },
             {
                 "type": "text",
-                "text": f"/* Details about the df_{1} other info as follows:\n",
+                "text": f"/* Details about the df_{1} other info as follows:\n <TABLE_CONTENT>\n*/ \n Question: 帮我查看数据前10行",
             },
             {
                 "type": "table",
@@ -274,14 +274,14 @@ Python code: Provide the Python code, wrapped in ```python ... ```.
                     ]
                 },
             },
-            {
-                "type": "text",
-                "text": "*/",
-            },
-            {
-                "type": "text",
-                "text": "Question: 帮我查看数据前10行",
-            },
+            # {
+            #     "type": "text",
+            #     "text": "",
+            # },
+            # {
+            #     "type": "text",
+            #     "text": "",
+            # },
         ],
     },
 ]
@@ -313,7 +313,7 @@ a = [
             },
             {
                 "type": "text",
-                "text": "/*\nDetails about the 'df1' other info as follows:\n",
+                "text": "/*\nDetails about the 'df1' other info as follows:\n<TABLE_CONTENT>*/\n",
             },
             {
                 "type": "table",
@@ -350,7 +350,7 @@ a = [
                     ]
                 },
             },
-            {"type": "text", "text": "*/"},
+            # {"type": "text", "text": ""},
         ],
     },
     {
@@ -379,7 +379,7 @@ a = [
             },
             {
                 "type": "text",
-                "text": "/*\nDetails about the 'df2' other info as follows:\n",
+                "text": "/*\nDetails about the 'df2' other info as follows:\n<TABLE_CONTENT>\n*/",
             },
             {
                 "type": "table",
@@ -423,49 +423,7 @@ a = [
                     ]
                 },
             },
-            {
-                "type": "table",
-                "table": {
-                    "columns": [
-                        {
-                            "name": "treatment_id",
-                            "dtype": "int64",
-                            "contains_nan": False,
-                            "is_unique": True,
-                            "values": [1, 2],
-                        },
-                        {
-                            "name": "patient_id",
-                            "dtype": "int64",
-                            "contains_nan": False,
-                            "is_unique": True,
-                            "values": [1, 2],
-                        },
-                        {
-                            "name": "treatment",
-                            "dtype": "object",
-                            "contains_nan": False,
-                            "is_unique": True,
-                            "values": ["MBSR", "Medication"],
-                        },
-                        {
-                            "name": "date",
-                            "dtype": "object",
-                            "contains_nan": False,
-                            "is_unique": True,
-                            "values": ["2021-01-01", "2021-01-02"],
-                        },
-                        {
-                            "name": "completion_date",
-                            "dtype": "object",
-                            "contains_nan": True,
-                            "is_unique": False,
-                            "values": ["2021-03-01", "nan"],
-                        },
-                    ]
-                },
-            },
-            {"type": "text", "text": "*/"},
+            # {"type": "text", "text": "*/"},
         ],
     },
     {
@@ -481,11 +439,16 @@ a = [
 
 # model.llm_engine.model_config.hf_config.encoder_config.max_cols = 2
 # model.llm_engine.model_config.multimodal_config.limit_per_prompt = {"table":3}
-batch_msgs.append(empty_values_msgs)
-batch_msgs.append(a)
-results = model.chat(
-    messages=batch_msgs, sampling_params=p
-)
+# batch_msgs.append(empty_values_msgs)
+# batch_msgs.append(a)
+results = model.chat(messages=batch_msgs, sampling_params=p)
 # results = model.chat(messages=a, sampling_params=p)
 
-print(results)
+for res in results:
+    print("=" * 10 + "Prompt Start" + "=" * 10)
+    print(res.prompt)
+    print("=" * 10 + "Prompt End" + "=" * 10)
+
+    print("=" * 10 + "Response Start" + "=" * 10)
+    print(res.outputs[0].text)
+    print("=" * 10 + "Response End" + "=" * 10)

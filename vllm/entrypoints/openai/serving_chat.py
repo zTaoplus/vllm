@@ -14,7 +14,6 @@ from typing import Sequence as GenericSequence
 from typing import Union
 
 from fastapi import Request
-from transformers import PreTrainedTokenizer
 
 from vllm.config import ModelConfig
 from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -70,70 +69,6 @@ from vllm.transformers_utils.tokenizer import AnyTokenizer, MistralTokenizer
 from vllm.utils import iterate_with_cancellation, random_uuid
 
 logger = init_logger(__name__)
-
-
-def _table_tokenizer_insert(
-    prompt: str, tokenizer: PreTrainedTokenizer, model_config: ModelConfig
-) -> List[int]:
-    """
-    Tokenizes the input prompt by inserting a separator token
-    between each chunk of text.
-
-    Args:
-        prompt (str): The input prompt to be tokenized.
-                    It contains one or more instances of the
-                    INSERT_EMBS_TOKEN.
-        tokenizer (transformers.PreTrainedTokenizer):
-            The tokenizer object used for tokenization.
-
-    Returns:
-       List[int]: The tokenized input prompt as a list of input IDs.
-
-    """
-
-    hf_config = model_config.hf_config
-
-    # get placeholder is None then get the insert embeds token,
-    # if not has the token , should raise
-    placeholder_token = getattr(
-        hf_config, "placeholder_token", None
-    ) or getattr(hf_config.encoder_config, "insert_embs_token")
-    placeholder_token_id = getattr(
-        hf_config, "placeholder_token_id", None
-    ) or getattr(hf_config.encoder_config, "insert_embs_token_id")
-
-    _repeated_count = 1 if hf_config.model_type.endswith("markup") else 3
-
-    prompt_chunks = [
-        tokenizer(
-            e,
-            padding="longest",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        ).input_ids
-        for e in prompt.split(placeholder_token)
-    ]
-
-    def insert_separator(X, sep):
-        return [ele for sublist in zip(X, [sep] * len(X)) for ele in sublist][
-            :-1
-        ]
-
-    input_ids = []
-    offset = 0
-    if (
-        len(prompt_chunks) > 0
-        and len(prompt_chunks[0]) > 0
-        and prompt_chunks[0][0] == tokenizer.bos_token_id
-    ):
-        offset = 1
-        input_ids.append(prompt_chunks[0][0])
-
-    for x in insert_separator(
-        prompt_chunks, [placeholder_token_id] * _repeated_count * (offset + 1)
-    ):
-        input_ids.extend(x[offset:])
-    return input_ids
 
 
 class OpenAIServingChat(OpenAIServing):
@@ -298,22 +233,14 @@ class OpenAIServingChat(OpenAIServing):
                 )
 
             if isinstance(prompt, str):
-                if "table" in mm_data:
-                    table_prompt_intptu_ids = _table_tokenizer_insert(
-                        prompt, tokenizer, model_config
-                    )
-
-                    prompt_inputs = TextTokensPrompt(
-                        prompt_token_ids=table_prompt_intptu_ids, prompt=prompt
-                    )
-                else:
-                    prompt_inputs = self._tokenize_prompt_input(
-                        request,
-                        tokenizer,
-                        prompt,
-                        truncate_prompt_tokens=request.truncate_prompt_tokens,
-                        add_special_tokens=request.add_special_tokens,
-                    )
+                
+                prompt_inputs = self._tokenize_prompt_input(
+                    request,
+                    tokenizer,
+                    prompt,
+                    truncate_prompt_tokens=request.truncate_prompt_tokens,
+                    add_special_tokens=request.add_special_tokens,
+                )
 
             else:
                 assert isinstance(prompt, list) and isinstance(

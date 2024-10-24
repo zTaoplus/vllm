@@ -607,27 +607,7 @@ class LLM:
             if is_list_of(prompt_data, int):
                 prompt = TokensPrompt(prompt_token_ids=prompt_data)
             else:
-                if (
-                    isinstance(mm_data, Dict)
-                    and "table" in mm_data
-                ):
-                    from vllm.entrypoints.openai.serving_chat import (
-                        _table_tokenizer_insert,
-                    )
-
-                    print("------------------PROMPT Start----------------")
-                    print(prompt_data)
-                    print("------------------PROMPT END-----------------")
-
-                    table_prompt_input_ids = _table_tokenizer_insert(
-                        prompt_data, tokenizer, model_config
-                    )
-                    prompt = TokensPrompt(
-                        prompt_token_ids=table_prompt_input_ids
-                    )
-
-                else:
-                    prompt = TextPrompt(prompt=prompt_data)
+                prompt = TextPrompt(prompt=prompt_data)
 
             if mm_data is not None:
                 prompt["multi_modal_data"] = mm_data

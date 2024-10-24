@@ -22,6 +22,12 @@ from vllm.transformers_utils.configs import TableGPTContrastiveConfig
 from vllm.entrypoints.chat_utils import ColumnsTable
 from vllm.inputs import InputContext, LLMInputs
 from vllm.multimodal.utils import cached_get_tokenizer
+from vllm.multimodal.table import (
+    get_full_tables_info,
+    get_full_tarbular_text_prompt,
+    table_custom_tokenize_encode,
+)
+
 from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
 
 TABGPT_ENCODER = None
@@ -42,7 +48,7 @@ def get_embedded_table(
 ):
     table_max_rows = ctx_table_max_rows
     table_max_cols = ctx_table_max_cols
-    
+
     df_col_count = len(table["columns"])
 
     tb_vals = []
@@ -210,17 +216,39 @@ def input_processor_for_tablegpt_encoder(
 
     mm_data = llm_inputs["multi_modal_data"]
 
-    tokenizer = cached_get_tokenizer(
+    encoder_tokenizer = cached_get_tokenizer(
         ctx.model_config.model,
         subfolder=ctx.model_config.hf_config.encoder_config.subfolder,
     )
 
+    decoder_tokenizer = cached_get_tokenizer(ctx.model_config.model)
+
+    if "prompt" not in llm_inputs:
+        raise ValueError("Prompt not on llm inputs!!")
+
+    # TODO: re tokenized for string prompt
+    # 1. extract table infos
+    table_infos = get_full_tables_info(
+        mm_data["table"], ctx.model_config, return_text=False
+    )
+    # 2. replace table content special token
+    table_text_prompt = get_full_tarbular_text_prompt(
+        "<TABLE_CONTENT>", table_infos, llm_inputs["prompt"]
+    )
+    # 3. use custom tokenizer encoding prompt ti token ids
+    new_prompt_token_ids = table_custom_tokenize_encode(
+        table_text_prompt, decoder_tokenizer, ctx.model_config
+    )
+
     table_embeddings = get_encoder_output(
-        mm_data["table"], model_config=ctx.model_config, tokenizer=tokenizer
+        mm_data["table"],
+        model_config=ctx.model_config,
+        tokenizer=encoder_tokenizer,
     )
 
     return LLMInputs(
-        prompt_token_ids=llm_inputs["prompt_token_ids"],
+        prompt_token_ids=new_prompt_token_ids,
+        prompt=table_text_prompt,
         multi_modal_data={"table": table_embeddings[0]},
     )
 

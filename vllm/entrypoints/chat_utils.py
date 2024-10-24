@@ -45,7 +45,7 @@ from typing_extensions import Required, TypeAlias, TypedDict
 from vllm.config import ModelConfig
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalDataDict
-from vllm.multimodal.base import ColumnsTable, MarkdownTable
+from vllm.multimodal.table import ColumnsTable, MarkdownTable
 from vllm.multimodal.utils import (
     async_get_and_parse_audio,
     async_get_and_parse_image,
@@ -457,111 +457,6 @@ _TabularParser = partial(cast, ChatCompletionContentPartTabularParam)
 MODEL_KEEP_MULTI_MODAL_CONTENT = {"mllama"}
 
 
-def __dataframe_info_simple(
-    table: ColumnsTable | MarkdownTable, model_config: ModelConfig
-) -> str:
-    if isinstance(table, MarkdownTable):
-        return model_config.hf_config.placeholder_token + "\n"
-
-    max_example_values = 3
-
-    insert_embs_token = model_config.hf_config.encoder_config.insert_embs_token
-    insert_seq_token = model_config.hf_config.encoder_config.insert_seq_token
-
-    max_cols = model_config.hf_config.encoder_config.max_cols
-
-    placeholder_val = insert_seq_token + insert_embs_token + insert_seq_token
-
-    desc_info_lines = []
-    tables_sampled = table["columns"]
-    if max_cols < len(table["columns"]):
-        print(f"""The model supports a maximum of {max_cols} columns, 
-but {len(table['columns'])} were received. 
-Currently, {max_cols} records have been sampled to continue the process. 
-If the results are unsatisfactory, 
-please ensure that the length of the columns in the table is ≤ {max_cols}""")
-
-        tables_sampled = random.sample(table["columns"], max_cols)
-
-    for col in tables_sampled:
-        n = col["name"]
-        tp = col["dtype"] + ","
-        isu = ""
-        if col.get("is_unique"):
-            isu = "is unique,"
-
-        if isu and ("float" in tp or "int" in tp):
-            isu = ""
-
-        unique_col_vals = set(col["values"])
-
-        ctn = "contains NaN," if col.get("contains_nan") else ""
-        expval_prefx = "Example Values: "
-        expval = str(
-            random.sample(
-                list(unique_col_vals),
-                min(len(unique_col_vals), max_example_values),
-            )
-        )
-
-        if len(unique_col_vals) > max_example_values:
-            expval = expval.rsplit("]", maxsplit=1)[0] + ", ...]"
-
-        desc_info_lines.append(
-            f"{placeholder_val} '{n}' {tp}{isu}{ctn}{expval_prefx+expval}"
-        )
-
-    desc_info = "\n".join(desc_info_lines)
-
-    return f"{desc_info}"
-
-
-def __build_table_question(
-    tables: Union[List[ColumnsTable] | List[MarkdownTable]],
-    model_config: ModelConfig,
-):
-    f = partial(__dataframe_info_simple, model_config=model_config)
-
-    df_info_list = [f(table) for table in tables]
-    return df_info_list
-
-
-def _get_full_tables(
-    tables: Union[List[ColumnsTable] | List[MarkdownTable]],
-    model_config: ModelConfig,
-    return_text=True,
-) -> str:
-    # or use the model config to jugdes which table info be returned
-    if not isinstance(tables, list):
-        tables = [tables]
-    return (
-        "".join(__build_table_question(tables, model_config))
-        if return_text
-        else __build_table_question(tables, model_config)
-    )
-
-
-def _get_full_tarbular_text_prompt(
-    placeholder_token_str: str, table_infos: List[str], text_prompt: str
-) -> str:
-    occurrences = re.findall(re.escape(placeholder_token_str), text_prompt)
-    if len(occurrences) == 0:
-        return f"{placeholder_token_str}\n{text_prompt}"
-
-    if len(occurrences) != len(table_infos):
-        raise ValueError(
-            f"The length of table_infos::List"
-            f"must match the number of occurrences of "
-            f"`{placeholder_token_str}`."
-        )
-
-    return re.sub(
-        re.escape(placeholder_token_str),
-        lambda match: table_infos.pop(0),
-        text_prompt,
-    )
-
-
 def _parse_chat_message_content_parts(
     role: str,
     parts: Iterable[ChatCompletionContentPartParam],
@@ -576,7 +471,6 @@ def _parse_chat_message_content_parts(
     )
 
     has_image = False
-    has_tabular = False
     for part in parts:
         part_type = part["type"]
         if part_type == "text":
@@ -603,20 +497,11 @@ def _parse_chat_message_content_parts(
             texts.append(text)
         elif part_type == "table":
             table = _TabularParser(part)["table"]
-            # TODO:
-            texts.append("<TABLE_CONTENT>")
             mm_parser.parse_table(table)
-            has_tabular = True
         else:
             raise NotImplementedError(f"Unknown part type: {part_type}")
 
-    def f(x, y):
-        if y == "<TABLE_CONTENT>":
-            return x + y
-        else:
-            return x + "\n" + y
-
-    text_prompt = reduce(f, texts)
+    text_prompt = "\n".join(texts)
 
     if keep_multimodal_content:
         text_prompt = "\n".join(texts)
@@ -627,29 +512,11 @@ def _parse_chat_message_content_parts(
         return [ConversationMessage(role=role, content=role_content)]  # type: ignore
     else:
         mm_placeholder_counts = mm_parser.mm_placeholder_counts()
-        # mm_placeholder_counts
-        if mm_placeholder_counts:
-            table_count = mm_placeholder_counts["<TABLE_CONTENT>"]
-            if has_tabular:
-                mm_data = mm_tracker.all_mm_data()
-                tables = mm_data["table"]
-                if not isinstance(tables, list):
-                    tables = [tables]
 
-                table_info_lst = _get_full_tables(
-                    tables[-table_count:],
-                    mm_tracker._model_config,
-                    return_text=False,
-                )
-                text_prompt = _get_full_tarbular_text_prompt(
-                    placeholder_token_str="<TABLE_CONTENT>",
-                    table_infos=table_info_lst,
-                    text_prompt=text_prompt,
-                )
-            else:
-                text_prompt = _get_full_multimodal_text_prompt(
-                    mm_placeholder_counts, text_prompt
-                )
+        if mm_placeholder_counts:
+            text_prompt = _get_full_multimodal_text_prompt(
+                mm_placeholder_counts, text_prompt
+            )
 
         return [ConversationMessage(role=role, content=text_prompt)]
 
