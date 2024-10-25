@@ -229,10 +229,6 @@ for csv_path, user_query in [
         )
 
 
-# results = model.chat(messages=batch_msgs, sampling_params=p)
-# print(results)
-
-
 empty_values_msgs = [
     {"role": "system", "content": "You are a helpul assistant."},
     {
@@ -436,13 +432,10 @@ a = [
     },
 ]
 
+batch_msgs.append(empty_values_msgs)
+batch_msgs.append(a)
 
-# model.llm_engine.model_config.hf_config.encoder_config.max_cols = 2
-# model.llm_engine.model_config.multimodal_config.limit_per_prompt = {"table":3}
-# batch_msgs.append(empty_values_msgs)
-# batch_msgs.append(a)
 results = model.chat(messages=batch_msgs, sampling_params=p)
-# results = model.chat(messages=a, sampling_params=p)
 
 for res in results:
     print("=" * 10 + "Prompt Start" + "=" * 10)

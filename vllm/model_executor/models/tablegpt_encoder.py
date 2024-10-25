@@ -2,6 +2,7 @@ import string
 import random
 import typing as t
 from array import array
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -39,43 +40,64 @@ def load_encoder(config: PretrainedConfig):
     return TABGPT_ENCODER
 
 
+# deprecating now
 def get_embedded_table(
     table: ColumnsTable,
     model_config: ModelConfig,
     tokenizer: PreTrainedTokenizer,
     ctx_table_max_cols: int,
     ctx_table_max_rows: int,
+    # current_table_max_rows?
 ):
     table_max_rows = ctx_table_max_rows
     table_max_cols = ctx_table_max_cols
 
-    df_col_count = len(table["columns"])
+    num_cols = len(table["columns"])
 
     tb_vals = []
+    # TODO: should get the max values for padding.
     for tb_col in table["columns"]:
         vals = tb_col["values"]
+        # TODO: should padding to the current table allowed  max rows?
         if not vals:
             # fill the pad token
             vals = [tokenizer.pad_token]
         tb_vals.append(vals)
 
+    # FIXME: tb vals should same shape, but values may become not same
+    # so we should'nt use th np array to save it
     tb = np.array(tb_vals)
 
-    _, num_cols = tb.shape[0], tb.shape[1]
+    # num_cols, _ = tb.shape[0], tb.shape[1]
 
-    if num_cols > table_max_cols:
-        tb = tb[:, np.random.choice(num_cols, table_max_cols, replace=False)]
-        num_cols = table_max_cols
+    anchor_row_num = tb.shape[1]
 
-    anchor_row_num = tb.shape[0]
     anchor_table = tb.reshape(-1)
+
+    input_list = anchor_table.astype(str).tolist()
+
+    # encoded_inputs_no_padding = tokenizer(
+    #     input_list, add_special_tokens=True, return_attention_mask=False
+    # )
+
+    # max_token_len = min(
+    #     max(len(ids) for ids in encoded_inputs_no_padding["input_ids"]),
+    #     model_config.hf_config.encoder_config.encoder_max_length,
+    # )
+
+    max_token_len = 64
+
+    # TODO: should using loggest padding.
+    # can use the longest with max_length to encode the longest length when shorter than max length
+    # and if seq len > max length , should truncted with tructions setting to True.
+
+    # TODO: send all table list
     anchor_table = tokenizer(
-        anchor_table.astype(str).tolist(),
+        input_list,
         padding="max_length",
         truncation=True,
-        max_length=model_config.hf_config.encoder_config.encoder_max_length,
+        max_length=max_token_len,
         return_tensors="pt",
-        # TODO: Should we consider setting add_special_tokens=False?
     )
     anchor_table = {
         k: v.reshape(anchor_row_num, num_cols, -1)
@@ -86,6 +108,7 @@ def get_embedded_table(
 
     anchor_table_row_num = anchor_table["input_ids"].shape[0]
 
+    # padding to torch.Size([max_rows, max_cols, 64])
     anchor_table_padded = {
         k: F.pad(
             v,
@@ -105,6 +128,7 @@ def get_embedded_table(
 
     anchor_table_mask = np.zeros((table_max_rows, table_max_cols))
 
+    # mask the table informations index.
     anchor_table_mask[:anchor_table_row_num, :num_cols] = 1
 
     ret = (
@@ -112,12 +136,13 @@ def get_embedded_table(
         anchor_table_padded["attention_mask"],
         anchor_table_padded["token_type_ids"],
         torch.tensor(anchor_table_mask),
-        df_col_count,
+        num_cols,
     )
     return ret
 
 
-def get_encoder_output(
+# # deprecating now
+def get_encoder_output_old(
     tables: t.List[ColumnsTable],
     model_config: ModelConfig,
     tokenizer: PreTrainedTokenizer,
@@ -203,6 +228,142 @@ def get_encoder_output(
             cat_table_embeds[i].append(table_embeds[i][j, : column_count[i][j]])
         cat_table_embeds[i] = torch.cat(cat_table_embeds[i], dim=0)
     return cat_table_embeds
+
+
+def get_encoder_output(
+    tables: t.List[ColumnsTable] | ColumnsTable,
+    model_config: ModelConfig,
+    tokenizer: PreTrainedTokenizer,
+):
+    if not isinstance(tables, list):
+        tables = [tables]
+
+    table_embeds = []
+
+    # context table max cols
+    ctx_max_col_length = 1
+    # context table max rows
+    ctx_max_row_length = model_config.hf_config.encoder_config.max_rows
+
+    # table area
+    table_area_values = []
+
+    table_values = []
+    for table in tables:
+        current_table_col_length = len(table["columns"])
+        ctx_max_col_length = max(ctx_max_col_length, current_table_col_length)
+
+        current_tb_max_rows = max(
+            max(len(t["values"]) for t in table["columns"]), 1
+        )
+
+        ctx_max_row_length = min(ctx_max_row_length, current_tb_max_rows)
+
+        table_area_values.append(
+            (current_table_col_length, current_tb_max_rows)
+        )
+
+        tb_vals = []
+
+        for tb_col in table["columns"]:
+            vals = tb_col["values"]
+            if len(vals) == 0:
+                vals = [np.nan]
+
+            if len(vals) >= current_tb_max_rows:
+                vals = vals[:current_tb_max_rows]
+            else:
+                vals = vals + [np.nan] * (current_tb_max_rows - len(vals))
+
+            tb_vals.append(vals)
+
+        table_values += np.array(tb_vals).reshape(-1).astype(str).tolist()
+
+    anchor_tables = tokenizer(
+        table_values,
+        padding="longest",
+        truncation=True,
+        max_length=model_config.hf_config.encoder_config.encoder_max_length,
+        return_tensors="pt",
+    )
+
+    _table_area_values = [col * row for col, row in table_area_values]
+
+    # split
+    splited_input_ids = torch.split(
+        anchor_tables["input_ids"], _table_area_values
+    )
+
+    splited_token_type_ids = torch.split(
+        anchor_tables["token_type_ids"], _table_area_values
+    )
+    splited_attention_mask = torch.split(
+        anchor_tables["attention_mask"], _table_area_values
+    )
+
+    to_encoder = defaultdict(list)
+
+    for (num_cols, num_rows), input_ids, token_type_ids, attention_mask in zip(
+        table_area_values,
+        splited_input_ids,
+        splited_token_type_ids,
+        splited_attention_mask,
+    ):
+        # 1. reshape
+        # 2. padding
+
+        def _padding_length(t):
+            return F.pad(
+                t,
+                (
+                    0,
+                    0,
+                    0,
+                    ctx_max_col_length - t.shape[1],
+                    0,
+                    ctx_max_row_length - t.shape[0],
+                ),
+                "constant",
+                1,
+            )
+
+        """
+        input_ids,
+        attention_mask,
+        token_type_ids,
+        table_mask,
+        """
+        to_encoder["input_ids"].append(
+            _padding_length(input_ids.reshape(num_rows, num_cols, -1))
+        )
+        to_encoder["token_type_ids"].append(
+            _padding_length(token_type_ids.reshape(num_rows, num_cols, -1))
+        )
+        to_encoder["attention_mask"].append(
+            _padding_length(attention_mask.reshape(num_rows, num_cols, -1))
+        )
+
+        _mask = torch.zeros((ctx_max_row_length, ctx_max_col_length))
+        _mask[:num_rows, :num_cols] = 1
+
+        to_encoder["table_mask"].append(_mask)
+
+    table_embeds = TABGPT_ENCODER(
+        **{
+            k: torch.stack(v, dim=0).to(TABGPT_ENCODER.st.device)
+            for k, v in to_encoder.items()
+        }
+    )
+
+    del to_encoder
+
+    # table_embeds shape: [table count, max col, hidden size]
+    return_table_embeds = []
+    for idx, (num_cols, _) in enumerate(table_area_values):
+        return_table_embeds.append(table_embeds[idx, :num_cols])
+
+    # FIXME: return tensor
+    return [torch.cat(return_table_embeds, dim=0)]
 
 
 def input_processor_for_tablegpt_encoder(
