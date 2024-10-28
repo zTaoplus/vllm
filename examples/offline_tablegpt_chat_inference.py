@@ -309,7 +309,8 @@ a = [
             },
             {
                 "type": "text",
-                "text": "/*\nDetails about the 'df1' other info as follows:\n<TABLE_CONTENT>*/\n",
+                # "text": "/*\nDetails about the 'df1' other info as follows:\n<TABLE_CONTENT>*/\n",
+                "text": "/*\nDetails about the 'df1' other info as follows:\n",
             },
             {
                 "type": "table",
@@ -375,7 +376,8 @@ a = [
             },
             {
                 "type": "text",
-                "text": "/*\nDetails about the 'df2' other info as follows:\n<TABLE_CONTENT>\n*/",
+                # "text": "/*\nDetails about the 'df2' other info as follows:\n<TABLE_CONTENT>\n*/",
+                "text": "/*\nDetails about the 'df2' other info as follows:\n",
             },
             {
                 "type": "table",
@@ -435,7 +437,7 @@ a = [
 batch_msgs.append(empty_values_msgs)
 batch_msgs.append(a)
 
-results = model.chat(messages=batch_msgs, sampling_params=p)
+results = model.chat(messages=a, sampling_params=p)
 
 for res in results:
     print("=" * 10 + "Prompt Start" + "=" * 10)
