@@ -16,6 +16,7 @@ from .image import ImagePlugin
 from .inputs import MultiModalDataDict, MultiModalKwargs, NestedTensors
 from .processing import MultiModalProcessor
 from .video import VideoPlugin
+from .table import TablePlugin
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig
@@ -54,7 +55,8 @@ class MultiModalRegistry:
     :class:`~vllm.multimodal.MultiModalPlugin` for each modality.
     """
 
-    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin(), VideoPlugin())
+    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin(), VideoPlugin(),
+                       TablePlugin())
 
     def __init__(
             self,

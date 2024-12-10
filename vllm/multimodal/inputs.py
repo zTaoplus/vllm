@@ -41,6 +41,15 @@ AudioItem: TypeAlias = Union[
 Represents a single audio that can be inputted to a HuggingFace
 :code:`AudioProcessor`.
 """
+
+
+TableItem: TypeAlias = Union[
+    Dict, # table columns, rows.
+    str, # markdown string
+    List[str],
+    List[Dict]
+]
+
 # yapf: enable
 
 MultiModalData: TypeAlias = Union[_T, List[_T]]
@@ -64,6 +73,9 @@ class MultiModalDataBuiltins(TypedDict, total=False):
 
     audio: MultiModalData[AudioItem]
     """The input audio(s)."""
+
+    table: MultiModalData[TableItem]
+    """The input table(s)."""
 
 
 MultiModalDataDict: TypeAlias = Mapping[str, MultiModalData[Any]]

@@ -145,8 +145,13 @@ _MULTIMODAL_MODELS = {
     "Qwen2VLForConditionalGeneration": ("qwen2_vl", "Qwen2VLForConditionalGeneration"),  # noqa: E501
     "Qwen2AudioForConditionalGeneration": ("qwen2_audio", "Qwen2AudioForConditionalGeneration"),  # noqa: E501
     "UltravoxModel": ("ultravox", "UltravoxModel"),
+    "TableGPTContrastiveForCausalLM": ("tablegpt",
+                                       "TableGPTContrastiveForCausalLM"),
+    "TableGPTMarkupForCausalLM": ("tablegpt",
+                                  "TableGPTMarkupForCausalLM"),
     # [Encoder-decoder]
     "MllamaForConditionalGeneration": ("mllama", "MllamaForConditionalGeneration"),  # noqa: E501
+  
 }
 
 _SPECULATIVE_DECODING_MODELS = {
